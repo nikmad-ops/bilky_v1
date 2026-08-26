@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "diagnostic": "node src/diagnostic.js"
+    "diagnostic": "node src/diagnostic.js",
+    "workshift": "node src/workshift.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
