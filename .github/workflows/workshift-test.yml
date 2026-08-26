@@ -1,0 +1,45 @@
+name: Bilky Scheduled Test
+
+on:
+  schedule:
+    - cron: '10 1 27 8 *'
+      timezone: "Europe/Madrid"
+
+jobs:
+  evening-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Bilky evening test for 26 August
+        env:
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          TARGET_DATE: "2026-08-26"
+          ACTION: "evening"
+
+        run: npm run workshift
+
+      - name: Upload diagnostics if something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-workshift-error
+          path: diagnostics/
+          retention-days: 3
+          if-no-files-found: ignore
