@@ -2,7 +2,7 @@ name: Bilky Scheduled Test
 
 on:
   schedule:
-    - cron: '10 1 27 8 *'
+    - cron: '25 1 27 8 *'
       timezone: "Europe/Madrid"
 
 jobs:
