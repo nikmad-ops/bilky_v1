@@ -1,0 +1,12 @@
+{
+  "name": "bilky-v1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "diagnostic": "node src/diagnostic.js"
+  },
+  "dependencies": {
+    "playwright-core": "^1.55.0"
+  }
+}
