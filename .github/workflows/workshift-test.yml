@@ -1,16 +1,22 @@
-name: Scheduler Test
+name: Scheduler Registration Test
 
 on:
+  push:
+    branches:
+      - main
+
   schedule:
-    - cron: '*/5 * * * *'
-      timezone: "Europe/Madrid"
+    - cron: '17,47 * * * *'
 
 jobs:
-  scheduler-test:
+  heartbeat:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Scheduler heartbeat
+      - name: Heartbeat
         run: |
-          echo "Scheduler works"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "UTC:"
+          date -u
+          echo "Local runner time:"
           date
