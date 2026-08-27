@@ -7,10 +7,8 @@ const {
   BROWSERLESS_TOKEN,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
-  TARGET_DATE,
   ACTION,
   EXECUTE,
-  ALLOW_HISTORICAL_TARGET,
 } = process.env;
 
 const LOGIN_URL = "https://panel.bilky.es/auth/login";
@@ -27,9 +25,7 @@ const required = {
 };
 
 for (const [name, value] of Object.entries(required)) {
-  if (!value) {
-    throw new Error(`Missing environment variable: ${name}`);
-  }
+  if (!value) throw new Error(`Missing environment variable: ${name}`);
 }
 
 if (!["morning", "evening"].includes(ACTION)) {
@@ -43,43 +39,56 @@ function getMadridDate() {
     month: "2-digit",
     day: "2-digit",
   }).formatToParts(new Date());
-
-  const value = (type) =>
-    parts.find((part) => part.type === type)?.value;
-
+  const value = (type) => parts.find((part) => part.type === type)?.value;
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
-const todayMadrid = getMadridDate();
-const targetDate = TARGET_DATE || todayMadrid;
+const targetDate = getMadridDate();
+
+function displayDate(date) {
+  const [y, m, d] = date.split("-");
+  return `${d}.${m}.${y}`;
+}
+
+function shortFact(time) {
+  return time ? time.slice(0, 5) : "--:--";
+}
+
+function minutesFromTime(time) {
+  if (!time) return null;
+  const [h, m] = time.slice(0, 5).split(":").map(Number);
+  return h * 60 + m;
+}
+
+function formatDuration(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}:${String(m).padStart(2, "0")}`;
+}
+
+function dayDuration(morningFact, eveningFact) {
+  const start = minutesFromTime(morningFact);
+  const end = minutesFromTime(eveningFact);
+  if (start == null || end == null || end < start) return null;
+  return formatDuration(end - start);
+}
 
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
 
 async function sendTelegram(message) {
-  const url =
-    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-  try {
-    const response = await fetch(url, {
+  const response = await fetch(
+    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text: message,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error(
-        `Telegram failed: ${response.status} ${await response.text()}`
-      );
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message }),
     }
-  } catch (error) {
-    console.error("Telegram exception:", error.message);
+  );
+
+  if (!response.ok) {
+    throw new Error(`Telegram failed: ${response.status} ${await response.text()}`);
   }
 }
 
@@ -90,32 +99,20 @@ function extractTime(text) {
 
 function extractFactTime(value) {
   if (!value) return null;
-
-  const match = value.match(
-    /^\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})$/
-  );
-
+  const match = value.match(/^\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})$/);
   return match ? match[1] : null;
 }
 
 async function readShiftCell(cell) {
   let planned = null;
-
   const input = cell.locator("input.clockpicker").first();
 
-  if (await input.count()) {
-    planned = await input.inputValue();
-  } else {
-    const text = await cell.innerText();
-    planned = extractTime(text);
-  }
+  if (await input.count()) planned = await input.inputValue();
+  else planned = extractTime(await cell.innerText());
 
   let fact = null;
   let factRaw = null;
-
-  const factIcon = cell
-    .locator('i.fe-clock[data-original-title]')
-    .first();
+  const factIcon = cell.locator('i.fe-clock[data-original-title]').first();
 
   if (await factIcon.count()) {
     factRaw = await factIcon.getAttribute("data-original-title");
@@ -124,7 +121,6 @@ async function readShiftCell(cell) {
 
   const clockButton = cell.locator("a.clock").first();
   const buttonExists = (await clockButton.count()) > 0;
-
   let buttonEnabled = false;
   let buttonId = null;
 
@@ -134,52 +130,27 @@ async function readShiftCell(cell) {
     buttonId = await clockButton.getAttribute("id");
   }
 
-  return {
-    planned,
-    fact,
-    factRaw,
-    buttonExists,
-    buttonEnabled,
-    buttonId,
-  };
+  return { planned, fact, factRaw, buttonExists, buttonEnabled, buttonId };
 }
 
 async function readDayState(page, date) {
   const containerSelector = `#container_${date}`;
   const container = page.locator(containerSelector);
+  await container.waitFor({ state: "visible", timeout: 15000 });
 
-  await container.waitFor({
-    state: "visible",
-    timeout: 15000,
-  });
-
-  const row = container
-    .locator("tr")
-    .filter({ hasText: "First shift" })
-    .first();
-
-  if (!(await row.count())) {
-    throw new Error(`First shift row not found for ${date}`);
-  }
+  const row = container.locator("tr").filter({ hasText: "First shift" }).first();
+  if (!(await row.count())) throw new Error(`First shift row not found for ${date}`);
 
   const shiftCells = row.locator("td.hr-container");
-
   if ((await shiftCells.count()) < 2) {
     throw new Error(`Expected morning and evening cells for ${date}`);
   }
 
   const morning = await readShiftCell(shiftCells.nth(0));
   const evening = await readShiftCell(shiftCells.nth(1));
-
-  const signedBadge = container
-    .locator(".badge-success")
-    .filter({ hasText: "Signed" });
-
-  const signed = (await signedBadge.count()) > 0;
-
-  const signButton = container.locator("button#sign");
-  const signAvailable = (await signButton.count()) > 0;
-
+  const signed =
+    (await container.locator(".badge-success").filter({ hasText: "Signed" }).count()) > 0;
+  const signAvailable = (await container.locator("button#sign").count()) > 0;
   const text = await container.innerText();
   const pendingSignature = text.toLowerCase().includes("pending signature");
 
@@ -195,84 +166,42 @@ async function readDayState(page, date) {
 
 function printState(state) {
   log("----- DAY STATE -----");
-  log(
-    `Morning: plan=${state.morning.planned ?? "NONE"} ` +
-    `fact=${state.morning.fact ?? "NONE"} ` +
-    `button=${state.morning.buttonExists ? "YES" : "NO"} ` +
-    `enabled=${state.morning.buttonEnabled}`
-  );
-  log(
-    `Evening: plan=${state.evening.planned ?? "NONE"} ` +
-    `fact=${state.evening.fact ?? "NONE"} ` +
-    `button=${state.evening.buttonExists ? "YES" : "NO"} ` +
-    `enabled=${state.evening.buttonEnabled}`
-  );
-  log(
-    `Signed=${state.signed} ` +
-    `SignAvailable=${state.signAvailable} ` +
-    `PendingSignature=${state.pendingSignature}`
-  );
+  log(`Morning: plan=${state.morning.planned ?? "NONE"} fact=${state.morning.fact ?? "NONE"} button=${state.morning.buttonExists ? "YES" : "NO"} enabled=${state.morning.buttonEnabled}`);
+  log(`Evening: plan=${state.evening.planned ?? "NONE"} fact=${state.evening.fact ?? "NONE"} button=${state.evening.buttonExists ? "YES" : "NO"} enabled=${state.evening.buttonEnabled}`);
+  log(`Signed=${state.signed} SignAvailable=${state.signAvailable} PendingSignature=${state.pendingSignature}`);
   log("---------------------");
 }
 
 async function loginAndOpenWorkshift(page) {
   log("Opening Bilky login.");
-
-  await page.goto(LOGIN_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 30000,
-  });
+  await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
 
   const visibleInputs = page.locator("input:visible");
-
-  if ((await visibleInputs.count()) < 2) {
-    throw new Error("Bilky login fields not found");
-  }
-
-  const passwordInput = page.locator('input[type="password"]').first();
+  if ((await visibleInputs.count()) < 2) throw new Error("Bilky login fields not found");
 
   await visibleInputs.nth(0).fill(BILKY_NIF);
-  await passwordInput.fill(BILKY_PASSWORD);
+  await page.locator('input[type="password"]').first().fill(BILKY_PASSWORD);
 
   const submit = page.locator('button[type="submit"]').first();
-
-  if (!(await submit.count())) {
-    throw new Error("Bilky login button not found");
-  }
-
+  if (!(await submit.count())) throw new Error("Bilky login button not found");
   await submit.click();
 
   const deadline = Date.now() + 25000;
-
   while (Date.now() < deadline) {
     await page.waitForTimeout(1000);
-
-    if (!page.url().includes("/auth/login")) {
-      break;
-    }
+    if (!page.url().includes("/auth/login")) break;
   }
 
   if (page.url().includes("/auth/login")) {
-    throw new Error(
-      "Bilky security verification/login did not clear within 25 seconds"
-    );
+    throw new Error("Bilky security verification/login did not clear within 25 seconds");
   }
 
   log("Login OK.");
-
-  const workshiftLink = page
-    .getByText("Workshift control", { exact: true })
-    .first();
-
-  await workshiftLink.waitFor({
-    state: "visible",
-    timeout: 15000,
-  });
-
+  const workshiftLink = page.getByText("Workshift control", { exact: true }).first();
+  await workshiftLink.waitFor({ state: "visible", timeout: 15000 });
   await workshiftLink.click();
   await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1200);
-
   log(`Workshift opened: ${page.url()}`);
 }
 
@@ -281,39 +210,25 @@ async function clock(page, state, mode) {
   const expectedPlan = mode === "morning" ? "08:00" : "16:00";
 
   if (side.planned !== expectedPlan) {
-    throw new Error(
-      `${mode}: unexpected planned time ${side.planned}; expected ${expectedPlan}`
-    );
+    throw new Error(`${mode}: unexpected planned time ${side.planned}; expected ${expectedPlan}`);
   }
-
   if (side.fact) {
     log(`${mode}: already clocked at ${side.fact}. No duplicate click.`);
     return { alreadyDone: true, fact: side.fact };
   }
-
-  if (!side.buttonExists) {
-    throw new Error(`${mode}: Clock in/out button does not exist`);
-  }
-
-  if (!side.buttonEnabled) {
-    throw new Error(`${mode}: Clock in/out button is disabled`);
-  }
-
+  if (!side.buttonExists) throw new Error(`${mode}: Clock in/out button does not exist`);
+  if (!side.buttonEnabled) throw new Error(`${mode}: Clock in/out button is disabled`);
   if (mode === "evening" && !state.morning.fact) {
     throw new Error("Evening blocked because morning fact is missing");
   }
 
   const container = page.locator(state.containerSelector);
-  const row = container
-    .locator("tr")
-    .filter({ hasText: "First shift" })
-    .first();
+  const row = container.locator("tr").filter({ hasText: "First shift" }).first();
   const cells = row.locator("td.hr-container");
   const cell = mode === "morning" ? cells.nth(0) : cells.nth(1);
   const button = cell.locator("a.clock").first();
 
   log(`CLICK ${mode}: ${side.buttonId}`);
-
   const responsePromise = page.waitForResponse(
     (response) =>
       response.url().includes("/employee/hour-registration/clock-hour") &&
@@ -323,12 +238,8 @@ async function clock(page, state, mode) {
 
   await button.click();
   const response = await responsePromise;
-
   log(`clock-hour HTTP ${response.status()}`);
-
-  if (!response.ok()) {
-    throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
-  }
+  if (!response.ok()) throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
 
   await page.waitForTimeout(1200);
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
@@ -336,53 +247,30 @@ async function clock(page, state, mode) {
 
   const newState = await readDayState(page, targetDate);
   printState(newState);
-
   const newSide = mode === "morning" ? newState.morning : newState.evening;
-
   if (!newSide.fact) {
-    throw new Error(
-      `${mode}: POST succeeded but factual timestamp was not found after reload`
-    );
+    throw new Error(`${mode}: POST succeeded but factual timestamp was not found after reload`);
   }
 
   log(`${mode}: FACT CONFIRMED ${newSide.fact}`);
-
-  return {
-    alreadyDone: false,
-    fact: newSide.fact,
-    state: newState,
-  };
+  return { alreadyDone: false, fact: newSide.fact, state: newState };
 }
 
 async function signDay(page) {
   let state = await readDayState(page, targetDate);
-
-  if (!state.evening.fact) {
-    throw new Error("Refusing to sign: evening fact is missing");
-  }
-
+  if (!state.evening.fact) throw new Error("Refusing to sign: evening fact is missing");
   if (state.signed) {
     log("Day already SIGNED.");
-    return true;
+    return state;
   }
+  if (!state.signAvailable) throw new Error("Evening completed but Sign button is unavailable");
 
-  if (!state.signAvailable) {
-    throw new Error("Evening completed but Sign button is unavailable");
-  }
-
-  const container = page.locator(state.containerSelector);
-  const signButton = container.locator("button#sign");
-
+  const signButton = page.locator(state.containerSelector).locator("button#sign");
   log("Clicking Sign.");
   await signButton.click();
 
   const confirmButton = page.locator(".sweet-alert:visible button.confirm");
-
-  await confirmButton.waitFor({
-    state: "visible",
-    timeout: 10000,
-  });
-
+  await confirmButton.waitFor({ state: "visible", timeout: 10000 });
   const responsePromise = page.waitForResponse(
     (response) =>
       response.url().includes("/employee/hour-registration/update-registration") &&
@@ -392,123 +280,73 @@ async function signDay(page) {
 
   log("Confirming Sign.");
   await confirmButton.click();
-
   const response = await responsePromise;
   log(`update-registration HTTP ${response.status()}`);
-
-  if (!response.ok()) {
-    throw new Error(`Bilky Sign returned HTTP ${response.status()}`);
-  }
+  if (!response.ok()) throw new Error(`Bilky Sign returned HTTP ${response.status()}`);
 
   await page.waitForTimeout(1200);
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForTimeout(1200);
-
   state = await readDayState(page, targetDate);
   printState(state);
-
   if (!state.signed) {
-    throw new Error(
-      "Sign POST succeeded but SIGNED status was not confirmed after reload"
-    );
+    throw new Error("Sign POST succeeded but SIGNED status was not confirmed after reload");
   }
-
   log("SIGNED CONFIRMED.");
-  return true;
+  return state;
 }
 
 async function main() {
   fs.mkdirSync("diagnostics", { recursive: true });
-
   log(`TARGET_DATE=${targetDate}`);
   log(`ACTION=${ACTION}`);
   log(`EXECUTE=${EXECUTE}`);
 
   if (EXECUTE !== "true") {
-    throw new Error(
-      "Execution blocked by internal kill switch: EXECUTE must equal true"
-    );
-  }
-
-  if (
-    targetDate !== todayMadrid &&
-    ALLOW_HISTORICAL_TARGET !== "true"
-  ) {
-    throw new Error(
-      `Historical TARGET_DATE blocked: ${targetDate}; today in Madrid is ${todayMadrid}`
-    );
+    throw new Error("Execution blocked by internal kill switch: EXECUTE must equal true");
   }
 
   const browser = await chromium.connectOverCDP(
     `wss://production-ams.browserless.io/stealth?token=${BROWSERLESS_TOKEN}`
   );
-
-  const contexts = browser.contexts();
-  const context = contexts[0] || (await browser.newContext());
-  const pages = context.pages();
-  const page = pages[0] || (await context.newPage());
+  const context = browser.contexts()[0] || (await browser.newContext());
+  const page = context.pages()[0] || (await context.newPage());
 
   try {
     await loginAndOpenWorkshift(page);
-
     let state = await readDayState(page, targetDate);
     printState(state);
 
     if (ACTION === "morning") {
       const result = await clock(page, state, "morning");
-
-      await sendTelegram(
-        [
-          result.alreadyDone
-            ? "ℹ️ Bilky morning already registered"
-            : "✅ Bilky morning registered",
-          `Date: ${targetDate}`,
-          "Plan: 08:00",
-          `Fact: ${result.fact}`,
-        ].join("\n")
-      );
-
+      await sendTelegram(`✅ Bilky ${displayDate(targetDate)}: УТРО. Факт: ${shortFact(result.fact)}`);
       log("MORNING SUCCESS");
       return;
     }
 
     const result = await clock(page, state, "evening");
-    const signed = await signDay(page);
+    const finalState = await signDay(page);
+    const duration = dayDuration(finalState.morning.fact, finalState.evening.fact);
+    if (!duration) throw new Error("Unable to calculate DAY from morning/evening facts");
 
     await sendTelegram(
-      [
-        result.alreadyDone
-          ? "ℹ️ Bilky evening already registered"
-          : "✅ Bilky evening registered",
-        `Date: ${targetDate}`,
-        "Plan: 16:00",
-        `Fact: ${result.fact}`,
-        `Signed: ${signed ? "YES" : "NO"}`,
-      ].join("\n")
+      `✅ Bilky ${displayDate(targetDate)}: ВЕЧЕР. Факт: ${shortFact(result.fact)}, Signed. DAY ${duration}`
     );
-
     log("EVENING SUCCESS");
   } catch (error) {
     console.error(`FAILED: ${error.message}`);
-
     try {
-      await page.screenshot({
-        path: "diagnostics/workshift-error.png",
-        fullPage: true,
-      });
+      await page.screenshot({ path: "diagnostics/workshift-error.png", fullPage: true });
     } catch {
       // Ignore screenshot failure
     }
 
-    await sendTelegram(
-      [
-        "❌ Bilky automation FAILED",
-        `Date: ${targetDate}`,
-        `Action: ${ACTION}`,
-        `Error: ${error.message}`,
-      ].join("\n")
-    );
-
+    const label = ACTION === "morning" ? "УТРО" : "ВЕЧЕР";
+    try {
+      await sendTelegram(`❌ Bilky ${displayDate(targetDate)}: ${label}. ERROR: ${error.message}`);
+    } catch (telegramError) {
+      console.error(`Telegram error notification failed: ${telegramError.message}`);
+    }
     throw error;
   } finally {
     await browser.close();
