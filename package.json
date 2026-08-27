@@ -4,7 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "diagnostic": "node src/diagnostic.js",
     "workshift": "node src/workshift.js"
   },
   "dependencies": {
