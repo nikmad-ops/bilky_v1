@@ -30,11 +30,16 @@ on:
         required: true
         default: false
         type: boolean
+      test_sequence:
+        description: 'One-time controlled sequence: yesterday evening, then today morning'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
 
     steps:
       - name: Safety gate
@@ -45,6 +50,7 @@ jobs:
           TARGET_DATE: ${{ inputs.target_date }}
           ALLOW_HISTORICAL_TARGET: ${{ inputs.allow_historical_target }}
           BYPASS_TIME_GUARD: ${{ inputs.bypass_time_guard }}
+          TEST_SEQUENCE: ${{ inputs.test_sequence }}
         shell: bash
         run: |
           set -euo pipefail
@@ -54,6 +60,7 @@ jobs:
           echo "Target date: ${TARGET_DATE:-<today>}"
           echo "Historical allowed: ${ALLOW_HISTORICAL_TARGET}"
           echo "Bypass time guard: ${BYPASS_TIME_GUARD}"
+          echo "Test sequence: ${TEST_SEQUENCE}"
 
           if [ "${EXECUTE}" != "true" ]; then
             echo "Execution disabled. No Bilky browser session will be started."
@@ -69,6 +76,19 @@ jobs:
           echo "Madrid date: ${MADRID_DATE}"
           echo "Madrid time: ${MADRID_TIME}"
           echo "Madrid weekday: ${MADRID_DOW}"
+
+          if [ "${TEST_SEQUENCE}" = "true" ]; then
+            if [ "${MADRID_DATE}" != "2026-08-27" ]; then
+              echo "Blocked: one-time test sequence is valid only on 2026-08-27 Madrid date."
+              exit 1
+            fi
+            echo "One-time autonomous test sequence approved."
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            echo "sequence=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "sequence=false" >> "$GITHUB_OUTPUT"
 
           if [ "${BYPASS_TIME_GUARD}" = "true" ]; then
             if [ -z "${TARGET_DATE}" ]; then
@@ -136,14 +156,49 @@ jobs:
         if: steps.safety.outputs.allowed == 'true'
         run: npm install
 
+      - name: Run one-time Bilky test sequence
+        if: steps.safety.outputs.allowed == 'true' && steps.safety.outputs.sequence == 'true'
+        env:
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          set +e
+
+          echo "TEST 1/2: yesterday evening (2026-08-26)"
+          ACTION=evening \
+          EXECUTE=true \
+          TARGET_DATE=2026-08-26 \
+          ALLOW_HISTORICAL_TARGET=true \
+          npm run workshift
+          EVENING_RC=$?
+
+          echo "TEST 1/2 exit code: ${EVENING_RC}"
+          echo "TEST 2/2: today morning (2026-08-27)"
+
+          ACTION=morning \
+          EXECUTE=true \
+          TARGET_DATE=2026-08-27 \
+          ALLOW_HISTORICAL_TARGET=false \
+          npm run workshift
+          MORNING_RC=$?
+
+          echo "TEST 2/2 exit code: ${MORNING_RC}"
+
+          if [ "${EVENING_RC}" -ne 0 ] || [ "${MORNING_RC}" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Run Bilky workshift
-        if: steps.safety.outputs.allowed == 'true'
+        if: steps.safety.outputs.allowed == 'true' && steps.safety.outputs.sequence != 'true'
         env:
           ACTION: ${{ inputs.action }}
           EXECUTE: 'true'
           TARGET_DATE: ${{ inputs.target_date }}
           ALLOW_HISTORICAL_TARGET: ${{ inputs.allow_historical_target }}
-          BYPASS_TIME_GUARD: ${{ inputs.bypass_time_guard }}
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
