@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "workshift": "node src/workshift.js"
+    "workshift": "node src/workshift.js",
+    "status": "node src/status.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
