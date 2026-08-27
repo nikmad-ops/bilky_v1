@@ -5,8 +5,8 @@ on:
     branches:
       - main
 
-  schedule:
-    - cron: '17,47 * * * *'
+schedule:
+  - cron: '12,17 * * * *'
 
 jobs:
   heartbeat:
