@@ -14,18 +14,37 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Authorize Telegram chat
+        id: auth
+        env:
+          REQUEST_CHAT_ID: ${{ inputs.chat_id }}
+          AUTHORIZED_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${REQUEST_CHAT_ID}" != "${AUTHORIZED_CHAT_ID}" ]; then
+            echo "Unauthorized Telegram chat_id."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "allowed=true" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
+        if: steps.auth.outputs.allowed == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.auth.outputs.allowed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Install dependencies
+        if: steps.auth.outputs.allowed == 'true'
         run: npm install
 
       - name: Read Bilky weekly status
+        if: steps.auth.outputs.allowed == 'true'
         env:
           REQUEST_CHAT_ID: ${{ inputs.chat_id }}
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
