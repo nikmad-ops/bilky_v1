@@ -92,6 +92,7 @@ jobs:
         if: steps.safety.outputs.allowed == 'true'
         env:
           ACTION: ${{ inputs.action }}
+          EXECUTE: 'true'
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
