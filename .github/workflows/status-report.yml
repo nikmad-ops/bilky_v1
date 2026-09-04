@@ -40,6 +40,7 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
+        id: deps
         if: steps.auth.outputs.allowed == 'true'
         shell: bash
         run: |
@@ -55,6 +56,7 @@ jobs:
           fi
 
       - name: Read Bilky weekly status
+        id: run_status
         if: steps.auth.outputs.allowed == 'true'
         env:
           REQUEST_CHAT_ID: ${{ inputs.chat_id }}
@@ -66,7 +68,7 @@ jobs:
         run: npm run status
 
       - name: Notify Telegram on workflow infrastructure failure
-        if: ${{ failure() && steps.auth.outputs.allowed == 'true' }}
+        if: ${{ failure() && steps.auth.outputs.allowed == 'true' && steps.run_status.outcome != 'failure' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -76,4 +78,4 @@ jobs:
             --max-time 15 \
             -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -H 'Content-Type: application/json' \
-            --data "{\"chat_id\":\"${TELEGRAM_CHAT_ID}\",\"text\":\"❌ Bilky STATUS. ERROR: GitHub workflow failed before status report completed\"}" || true
+            --data "{\"chat_id\":\"${TELEGRAM_CHAT_ID}\",\"text\":\"❌ Bilky STATUS. ERROR: GitHub workflow failed before status execution\"}" || true
