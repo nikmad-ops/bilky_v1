@@ -11,7 +11,7 @@ on:
 jobs:
   status:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
 
     steps:
       - name: Authorize Telegram chat
@@ -41,7 +41,18 @@ jobs:
 
       - name: Install dependencies
         if: steps.auth.outputs.allowed == 'true'
-        run: npm install
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm config set audit false
+          npm config set fund false
+          npm config set fetch-retries 1
+          npm config set fetch-retry-mintimeout 1000
+          npm config set fetch-retry-maxtimeout 5000
+          if ! timeout 90s npm install --prefer-offline --no-audit --no-fund; then
+            echo "First npm install failed/timed out; retrying once..."
+            timeout 90s npm install --prefer-offline --no-audit --no-fund
+          fi
 
       - name: Read Bilky weekly status
         if: steps.auth.outputs.allowed == 'true'
@@ -53,3 +64,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run status
+
+      - name: Notify Telegram on workflow infrastructure failure
+        if: ${{ failure() && steps.auth.outputs.allowed == 'true' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            --max-time 15 \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H 'Content-Type: application/json' \
+            --data "{\"chat_id\":\"${TELEGRAM_CHAT_ID}\",\"text\":\"❌ Bilky STATUS. ERROR: GitHub workflow failed before status report completed\"}" || true
