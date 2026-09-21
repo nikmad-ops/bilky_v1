@@ -247,6 +247,89 @@ export function createBilkyCore({
     );
   }
 
+  async function waitForSecurityVerificationToClear(
+    page,
+    {
+      timeoutMs = 60000,
+    } = {}
+  ) {
+    if (
+      !(await securityVerificationDetected(
+        page
+      ))
+    ) {
+      return;
+    }
+
+    log(
+      "Security verification detected. Waiting for Browserless automatic CAPTCHA solving."
+    );
+
+    const deadline =
+      Date.now() +
+      timeoutMs;
+
+    while (
+      Date.now() <
+      deadline
+    ) {
+      await page.waitForTimeout(
+        2000
+      );
+
+      if (
+        !(await securityVerificationDetected(
+          page
+        ))
+      ) {
+        log(
+          "Security verification cleared."
+        );
+
+        return;
+      }
+    }
+
+    throw new Error(
+      "Cloudflare security verification did not clear within 60 seconds"
+    );
+  }
+
+  async function attachBrowserlessCaptchaLogging(
+    page
+  ) {
+    try {
+      const cdp =
+        await page
+          .context()
+          .newCDPSession(
+            page
+          );
+
+      cdp.on(
+        "Browserless.captchaFound",
+        (event) => {
+          log(
+            `Browserless CAPTCHA found: ${JSON.stringify(event)}`
+          );
+        }
+      );
+
+      cdp.on(
+        "Browserless.captchaAutoSolved",
+        (event) => {
+          log(
+            `Browserless CAPTCHA auto-solved: ${JSON.stringify(event)}`
+          );
+        }
+      );
+    } catch (error) {
+      log(
+        `Browserless CAPTCHA event logging unavailable: ${error.message}`
+      );
+    }
+  }
+
   async function captureDiagnostics(
     page,
     attempt,
@@ -363,6 +446,10 @@ export function createBilkyCore({
   async function assertNoSecurityVerification(
     page
   ) {
+    await waitForSecurityVerificationToClear(
+      page
+    );
+
     if (
       await securityVerificationDetected(
         page
@@ -1157,7 +1244,7 @@ export function createBilkyCore({
 
         browser =
           await chromium.connectOverCDP(
-            `wss://production-ams.browserless.io/stealth?token=${browserlessToken}`
+            `wss://production-ams.browserless.io/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=es&solveCaptchas=true`
           );
 
         const context =
@@ -1167,6 +1254,10 @@ export function createBilkyCore({
         page =
           context.pages()[0] ||
           (await context.newPage());
+
+        await attachBrowserlessCaptchaLogging(
+          page
+        );
 
         await loginAndOpenWorkshift(
           page,
