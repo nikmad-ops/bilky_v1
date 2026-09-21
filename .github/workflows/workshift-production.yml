@@ -55,9 +55,16 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0830 ]; then
-                echo "Blocked: morning execution outside 07:55-08:30 Europe/Madrid."
-                exit 1
+              if [ "${MADRID_DATE}" = "2026-09-21" ]; then
+                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0930 ]; then
+                  echo "Blocked: recovery morning execution outside 07:55-09:30 Europe/Madrid."
+                  exit 1
+                fi
+              else
+                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0830 ]; then
+                  echo "Blocked: morning execution outside 07:55-08:30 Europe/Madrid."
+                  exit 1
+                fi
               fi
               ;;
             evening)
