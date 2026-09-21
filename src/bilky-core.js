@@ -446,10 +446,6 @@ export function createBilkyCore({
   async function assertNoSecurityVerification(
     page
   ) {
-    await waitForSecurityVerificationToClear(
-      page
-    );
-
     if (
       await securityVerificationDetected(
         page
@@ -1244,7 +1240,7 @@ export function createBilkyCore({
 
         browser =
           await chromium.connectOverCDP(
-            `wss://production-ams.browserless.io/stealth?token=${browserlessToken}&proxy=residential&proxyCountry=es&solveCaptchas=true`
+            `wss://production-ams.browserless.io/stealth?token=${browserlessToken}`
           );
 
         const context =
