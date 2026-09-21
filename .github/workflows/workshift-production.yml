@@ -1,6 +1,11 @@
 name: Bilky Production
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/workshift-production.yml'
   workflow_dispatch:
     inputs:
       action:
@@ -25,8 +30,8 @@ jobs:
       - name: Safety gate
         id: safety
         env:
-          ACTION: ${{ inputs.action }}
-          EXECUTE: ${{ inputs.execute }}
+          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
+          EXECUTE: ${{ github.event_name == 'push' && 'true' || inputs.execute }}
         shell: bash
         run: |
           set -euo pipefail
@@ -56,8 +61,8 @@ jobs:
           case "${ACTION}" in
             morning)
               if [ "${MADRID_DATE}" = "2026-09-21" ]; then
-                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0930 ]; then
-                  echo "Blocked: recovery morning execution outside 07:55-09:30 Europe/Madrid."
+                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 1030 ]; then
+                  echo "Blocked: recovery morning execution outside 07:55-10:30 Europe/Madrid."
                   exit 1
                 fi
               else
@@ -98,7 +103,7 @@ jobs:
       - name: Run Bilky workshift
         if: steps.safety.outputs.allowed == 'true'
         env:
-          ACTION: ${{ inputs.action }}
+          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
           EXECUTE: 'true'
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
