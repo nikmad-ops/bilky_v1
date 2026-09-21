@@ -2,7 +2,7 @@ name: Bilky TEMP Personal Live Test 11:50
 
 on:
   schedule:
-    - cron: '50 9 21 9 *'
+    - cron: '5 10 21 9 *'
 
 jobs:
   live-test:
