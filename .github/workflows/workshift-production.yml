@@ -1,11 +1,6 @@
 name: Bilky Production
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/workshift-production.yml'
   workflow_dispatch:
     inputs:
       action:
@@ -30,8 +25,8 @@ jobs:
       - name: Safety gate
         id: safety
         env:
-          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
-          EXECUTE: ${{ github.event_name == 'push' && 'true' || inputs.execute }}
+          ACTION: ${{ inputs.action }}
+          EXECUTE: ${{ inputs.execute }}
         shell: bash
         run: |
           set -euo pipefail
@@ -103,7 +98,7 @@ jobs:
       - name: Run Bilky workshift
         if: steps.safety.outputs.allowed == 'true'
         env:
-          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
+          ACTION: ${{ inputs.action }}
           EXECUTE: 'true'
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
