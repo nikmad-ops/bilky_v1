@@ -188,6 +188,9 @@ export function createBilkyCore({
     }
   );
 
+  const captchaSolverPages =
+    new WeakSet();
+
   async function securityVerificationDetected(
     page
   ) {
@@ -447,14 +450,34 @@ export function createBilkyCore({
     page
   ) {
     if (
-      await securityVerificationDetected(
+      !(await securityVerificationDetected(
+        page
+      ))
+    ) {
+      return;
+    }
+
+    if (
+      captchaSolverPages.has(
         page
       )
     ) {
-      throw new Error(
-        "Cloudflare security verification blocked Bilky page"
+      await waitForSecurityVerificationToClear(
+        page
       );
+
+      if (
+        !(await securityVerificationDetected(
+          page
+        ))
+      ) {
+        return;
+      }
     }
+
+    throw new Error(
+      "Cloudflare security verification blocked Bilky page"
+    );
   }
 
   async function loginAndOpenWorkshift(
@@ -1238,9 +1261,21 @@ export function createBilkyCore({
           `${label}: attempt ${attempt}/3 starting`
         );
 
+        const solverEnabled =
+          attempt === 3;
+
+        const browserlessUrl =
+          solverEnabled
+            ? `wss://production-ams.browserless.io/stealth?token=${browserlessToken}&solveCaptchas=true`
+            : `wss://production-ams.browserless.io/stealth?token=${browserlessToken}`;
+
+        log(
+          `${label}: Browserless mode = ${solverEnabled ? "stealth + CAPTCHA solver" : "stealth only"}`
+        );
+
         browser =
           await chromium.connectOverCDP(
-            `wss://production-ams.browserless.io/stealth?token=${browserlessToken}`
+            browserlessUrl
           );
 
         const context =
@@ -1250,6 +1285,14 @@ export function createBilkyCore({
         page =
           context.pages()[0] ||
           (await context.newPage());
+
+        if (
+          solverEnabled
+        ) {
+          captchaSolverPages.add(
+            page
+          );
+        }
 
         await attachBrowserlessCaptchaLogging(
           page
