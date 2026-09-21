@@ -19,7 +19,7 @@ on:
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 20
 
     steps:
       - name: Safety gate
@@ -55,8 +55,8 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 0745 ] || [ "${MADRID_TIME}" -gt 0820 ]; then
-                echo "Blocked: morning execution outside 07:45-08:20 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0830 ]; then
+                echo "Blocked: morning execution outside 07:55-08:30 Europe/Madrid."
                 exit 1
               fi
               ;;
@@ -99,3 +99,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run workshift
+
+      - name: Upload Bilky diagnostics
+        if: always() && steps.safety.outputs.allowed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-workshift-diagnostics-${{ github.run_id }}
+          path: diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14
