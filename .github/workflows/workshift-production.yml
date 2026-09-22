@@ -19,7 +19,7 @@ on:
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - name: Safety gate
@@ -31,22 +31,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Requested action: ${ACTION}"
-          echo "Execute: ${EXECUTE}"
-
           if [ "${EXECUTE}" != "true" ]; then
-            echo "Execution disabled. No Bilky browser session will be started."
             echo "allowed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           MADRID_TIME=$(TZ=Europe/Madrid date +%H%M)
-          MADRID_DATE=$(TZ=Europe/Madrid date +%F)
           MADRID_DOW=$(TZ=Europe/Madrid date +%u)
-
-          echo "Madrid date: ${MADRID_DATE}"
-          echo "Madrid time: ${MADRID_TIME}"
-          echo "Madrid weekday: ${MADRID_DOW}"
 
           if [ "${MADRID_DOW}" -gt 5 ]; then
             echo "Blocked: weekend."
@@ -55,16 +46,9 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_DATE}" = "2026-09-21" ]; then
-                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 1030 ]; then
-                  echo "Blocked: recovery morning execution outside 07:55-10:30 Europe/Madrid."
-                  exit 1
-                fi
-              else
-                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0830 ]; then
-                  echo "Blocked: morning execution outside 07:55-08:30 Europe/Madrid."
-                  exit 1
-                fi
+              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0830 ]; then
+                echo "Blocked: morning execution outside 07:55-08:30 Europe/Madrid."
+                exit 1
               fi
               ;;
             evening)
@@ -96,6 +80,7 @@ jobs:
         run: npm install
 
       - name: Run Bilky workshift
+        id: bilky
         if: steps.safety.outputs.allowed == 'true'
         env:
           ACTION: ${{ inputs.action }}
@@ -103,15 +88,86 @@ jobs:
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: npm run workshift
+
+      - name: Telegram success
+        if: success() && steps.safety.outputs.allowed == 'true'
+        env:
+          ACTION: ${{ inputs.action }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: npm run workshift
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          FACT=""
+          DURATION=""
+          SIGNED="false"
+          ALREADY="false"
+
+          if [ -f run-result.json ]; then
+            FACT=$(jq -r '.fact // empty' run-result.json)
+            DURATION=$(jq -r '.duration // empty' run-result.json)
+            SIGNED=$(jq -r '.signed // false' run-result.json)
+            ALREADY=$(jq -r '.alreadyDone // false' run-result.json)
+          fi
+
+          if [ "${ACTION}" = "morning" ]; then
+            LABEL="УТРО"
+            if [ -n "${FACT}" ]; then
+              MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Факт: ${FACT:0:5}"
+            elif [ "${ALREADY}" = "true" ]; then
+              MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Уже выполнено."
+            else
+              MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Выполнено."
+            fi
+          else
+            LABEL="ВЕЧЕР"
+            MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Выполнено"
+            if [ -n "${FACT}" ]; then
+              MESSAGE="${MESSAGE}. Факт: ${FACT:0:5}"
+            fi
+            if [ "${SIGNED}" = "true" ]; then
+              MESSAGE="${MESSAGE}. Signed"
+            fi
+            if [ -n "${DURATION}" ]; then
+              MESSAGE="${MESSAGE}. DAY ${DURATION}"
+            fi
+          fi
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+
+      - name: Telegram failure
+        if: failure() && steps.safety.outputs.allowed == 'true'
+        env:
+          ACTION: ${{ inputs.action }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          if [ "${ACTION}" = "morning" ]; then LABEL="УТРО"; else LABEL="ВЕЧЕР"; fi
+          MESSAGE="❌ Bilky ${DATE}: ${LABEL}. ERROR"
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
 
       - name: Upload Bilky diagnostics
         if: always() && steps.safety.outputs.allowed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: bilky-workshift-diagnostics-${{ github.run_id }}
-          path: diagnostics/
+          path: |
+            diagnostics/
+            run-result.json
+            run-error.txt
           if-no-files-found: ignore
           retention-days: 14
