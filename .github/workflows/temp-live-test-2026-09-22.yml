@@ -1,0 +1,97 @@
+name: Bilky TEMP Live Test 23:10
+
+on:
+  schedule:
+    - cron: '10 21 22 9 *'
+
+jobs:
+  live-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Guard exact test date
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          MADRID_DATE=$(TZ=Europe/Madrid date +%F)
+          if [ "${MADRID_DATE}" != "2026-09-22" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: npm install
+
+      - name: Run Bilky evening idempotency test
+        if: steps.guard.outputs.run == 'true'
+        env:
+          ACTION: evening
+          EXECUTE: 'true'
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: npm run workshift
+
+      - name: Telegram success
+        if: success() && steps.guard.outputs.run == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          FACT=$(jq -r '.fact // empty' run-result.json 2>/dev/null || true)
+          SIGNED=$(jq -r '.signed // false' run-result.json 2>/dev/null || echo false)
+          MESSAGE="✅ Bilky ${DATE}: ВЕЧЕР. Тест успешен"
+          if [ -n "${FACT}" ]; then MESSAGE="${MESSAGE}. Факт: ${FACT:0:5}"; fi
+          if [ "${SIGNED}" = "true" ]; then MESSAGE="${MESSAGE}. Signed"; fi
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+
+      - name: Telegram failure
+        if: failure() && steps.guard.outputs.run == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          MESSAGE="❌ Bilky ${DATE}: ВЕЧЕР. TEST ERROR"
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+
+      - name: Upload diagnostics
+        if: always() && steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-temp-test-${{ github.run_id }}
+          path: |
+            diagnostics/
+            run-result.json
+            run-error.txt
+          if-no-files-found: ignore
+          retention-days: 7
