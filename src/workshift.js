@@ -1,18 +1,15 @@
+import fs from "node:fs";
 import {
   createBilkyCore,
   dayDuration,
-  displayDate,
   getMadridDate,
   log,
-  shortFact,
 } from "./bilky-core.js";
 
 const {
   BILKY_NIF,
   BILKY_PASSWORD,
   BROWSERLESS_TOKEN,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID,
   ACTION,
   EXECUTE,
 } = process.env;
@@ -21,224 +18,130 @@ for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
   BROWSERLESS_TOKEN,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID,
   ACTION,
   EXECUTE,
 })) {
   if (!value) {
-    throw new Error(
-      `Missing environment variable: ${name}`
-    );
+    throw new Error(`Missing environment variable: ${name}`);
   }
 }
 
-if (
-  ![
-    "morning",
-    "evening",
-  ].includes(ACTION)
-) {
-  throw new Error(
-    `ACTION must be morning or evening. Got: ${ACTION}`
-  );
+if (!["morning", "evening"].includes(ACTION)) {
+  throw new Error(`ACTION must be morning or evening. Got: ${ACTION}`);
 }
 
-if (
-  EXECUTE !==
-  "true"
-) {
-  throw new Error(
-    "Execution blocked by internal kill switch: EXECUTE must equal true"
-  );
+if (EXECUTE !== "true") {
+  throw new Error("Execution blocked by internal kill switch: EXECUTE must equal true");
 }
 
-const targetDate =
-  getMadridDate();
+const targetDate = getMadridDate();
 
-async function sendTelegram(
-  message
-) {
-  const response =
-    await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+const bilky = createBilkyCore({
+  nif: BILKY_NIF,
+  password: BILKY_PASSWORD,
+  browserlessToken: BROWSERLESS_TOKEN,
+});
+
+function writeResult(result) {
+  fs.writeFileSync(
+    "run-result.json",
+    JSON.stringify(
       {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-        body:
-          JSON.stringify({
-            chat_id:
-              TELEGRAM_CHAT_ID,
-            text:
-              message,
-          }),
-      }
-    );
-
-  if (
-    !response.ok
-  ) {
-    throw new Error(
-      `Telegram failed: ${response.status} ${await response.text()}`
-    );
-  }
+        date: targetDate,
+        action: ACTION,
+        ...result,
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
 }
 
-const bilky =
-  createBilkyCore({
-    nif:
-      BILKY_NIF,
-    password:
-      BILKY_PASSWORD,
-    browserlessToken:
-      BROWSERLESS_TOKEN,
-  });
+async function runAction({ page, setStage }) {
+  setStage("read-current-state");
 
-async function runAction({
-  page,
-  setStage,
-}) {
-  setStage(
-    "read-current-state"
-  );
+  const state = await bilky.readDayState(page, targetDate);
+  bilky.printState(state);
 
-  let state =
-    await bilky.readDayState(
+  if (ACTION === "morning") {
+    const result = await bilky.clock(
       page,
-      targetDate
+      state,
+      "morning",
+      targetDate,
+      setStage
     );
-
-  bilky.printState(
-    state
-  );
-
-  if (
-    ACTION ===
-    "morning"
-  ) {
-    const result =
-      await bilky.clock(
-        page,
-        state,
-        "morning",
-        targetDate,
-        setStage
-      );
 
     return {
-      action:
-        "morning",
-      fact:
-        result.fact,
+      fact: result.fact || state.morning.fact || null,
+      alreadyDone: result.alreadyDone,
+      httpAccepted: Boolean(result.httpAccepted || result.alreadyDone),
     };
   }
 
-  const clockResult =
-    await bilky.clock(
-      page,
-      state,
-      "evening",
-      targetDate,
-      setStage
-    );
-
-  setStage(
-    "ensure-signed"
+  const clockResult = await bilky.clock(
+    page,
+    state,
+    "evening",
+    targetDate,
+    setStage
   );
 
-  const finalState =
-    await bilky.signDay(
-      page,
-      targetDate,
-      setStage
-    );
+  setStage("ensure-signed");
 
-  const duration =
-    dayDuration(
-      finalState.morning.fact,
-      finalState.evening.fact
-    );
+  const finalState = await bilky.signDay(
+    page,
+    targetDate,
+    setStage,
+    {
+      eveningCompleted: Boolean(
+        clockResult.httpAccepted ||
+        clockResult.alreadyDone ||
+        state.evening.fact
+      ),
+    }
+  );
 
-  if (!duration) {
-    throw new Error(
-      "Unable to calculate DAY from morning/evening facts"
-    );
-  }
+  const eveningFact =
+    clockResult.fact ||
+    state.evening.fact ||
+    finalState.evening?.fact ||
+    null;
 
   return {
-    action:
-      "evening",
-    fact:
-      clockResult.fact ||
-      finalState.evening.fact,
-    duration,
+    fact: eveningFact,
+    alreadyDone: clockResult.alreadyDone,
+    httpAccepted: Boolean(clockResult.httpAccepted || clockResult.alreadyDone),
+    signed: Boolean(finalState.signed || finalState.signAccepted),
+    duration: dayDuration(state.morning.fact, eveningFact),
   };
 }
 
 async function main() {
-  log(
-    `TARGET_DATE=${targetDate}`
+  log(`TARGET_DATE=${targetDate}`);
+  log(`ACTION=${ACTION}`);
+
+  const result = await bilky.runWithRetries(
+    `Bilky ${ACTION}`,
+    runAction
   );
 
-  log(
-    `ACTION=${ACTION}`
-  );
-
-  let result;
-
-  try {
-    result =
-      await bilky.runWithRetries(
-        `Bilky ${ACTION}`,
-        runAction
-      );
-  } catch (error) {
-    const label =
-      ACTION ===
-      "morning"
-        ? "УТРО"
-        : "ВЕЧЕР";
-
-    try {
-      await sendTelegram(
-        `❌ Bilky ${displayDate(targetDate)}: ${label}. ERROR after 3 attempts: ${error.cause?.message || error.message}`
-      );
-    } catch (
-      telegramError
-    ) {
-      console.error(
-        `Telegram error notification failed: ${telegramError.message}`
-      );
-    }
-
-    throw error;
-  }
-
-  if (
-    result.action ===
-    "morning"
-  ) {
-    await sendTelegram(
-      `✅ Bilky ${displayDate(targetDate)}: УТРО. Факт: ${shortFact(result.fact)}`
-    );
-
-    log(
-      "MORNING SUCCESS"
-    );
-
-    return;
-  }
-
-  await sendTelegram(
-    `✅ Bilky ${displayDate(targetDate)}: ВЕЧЕР. Факт: ${shortFact(result.fact)}, Signed. DAY ${result.duration}`
-  );
-
-  log(
-    "EVENING SUCCESS"
-  );
+  writeResult(result);
+  log(`${ACTION.toUpperCase()} SUCCESS`);
 }
 
-await main();
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    try {
+      fs.writeFileSync(
+        "run-error.txt",
+        String(error?.message || error || "Unknown error").split("\n")[0].slice(0, 300),
+        "utf8"
+      );
+    } catch {}
+
+    console.error(error);
+    process.exit(1);
+  });
