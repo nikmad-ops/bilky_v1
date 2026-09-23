@@ -473,19 +473,40 @@ export function createBilkyCore({
       throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
     }
 
-    let fact = null;
-    try {
-      const body = await response.text();
-      const match = body.match(/\b(\d{2}:\d{2}:\d{2})\b/);
-      fact = match ? match[1] : null;
-    } catch {}
+    log(`${mode}: HTTP 200 accepted. Waiting for Bilky page to expose the saved fact.`);
 
-    log(`${mode}: HTTP 200 accepted. No reload/verification.`);
+    // The clock-hour response can contain unrelated times. The authoritative
+    // fact is the clock icon in the relevant shift cell after Bilky updates
+    // the day container.
+    let verifiedState = null;
+    let fact = null;
+    const factDeadline = Date.now() + 15000;
+
+    while (Date.now() < factDeadline) {
+      await sleep(500);
+
+      try {
+        verifiedState = await readDayState(page, date);
+        fact =
+          mode === "morning"
+            ? verifiedState.morning.fact
+            : verifiedState.evening.fact;
+      } catch {}
+
+      if (fact) {
+        log(`${mode}: verified fact from page = ${fact}`);
+        break;
+      }
+    }
+
+    if (!fact) {
+      throw new Error(`${mode}: HTTP 200 accepted but saved fact was not found in the Bilky page`);
+    }
 
     return {
       alreadyDone: false,
       fact,
-      state,
+      state: verifiedState || state,
       httpAccepted: true,
     };
   }
