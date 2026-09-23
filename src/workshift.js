@@ -88,32 +88,15 @@ async function runAction({ page, setStage }) {
     setStage
   );
 
-  setStage("ensure-signed");
-
-  const finalState = await bilky.signDay(
-    page,
-    targetDate,
-    setStage,
-    {
-      eveningCompleted: Boolean(
-        clockResult.httpAccepted ||
-        clockResult.alreadyDone ||
-        state.evening.fact
-      ),
-    }
-  );
-
   const eveningFact =
     clockResult.fact ||
     state.evening.fact ||
-    finalState.evening?.fact ||
     null;
 
   return {
     fact: eveningFact,
     alreadyDone: clockResult.alreadyDone,
     httpAccepted: Boolean(clockResult.httpAccepted || clockResult.alreadyDone),
-    signed: Boolean(finalState.signed || finalState.signAccepted),
     duration: dayDuration(state.morning.fact, eveningFact),
   };
 }
