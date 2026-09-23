@@ -473,11 +473,39 @@ export function createBilkyCore({
       throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
     }
 
-    log(`${mode}: HTTP 200 accepted. Waiting for Bilky page to expose the saved fact.`);
+    const body = await response.text();
 
-    // The clock-hour response can contain unrelated times. The authoritative
-    // fact is the clock icon in the relevant shift cell after Bilky updates
-    // the day container.
+    if (mode === "morning") {
+      try {
+        fs.writeFileSync(
+          `${diagnosticsDir}/clock-morning-http-200-body.txt`,
+          body,
+          "utf8"
+        );
+        log("morning: full HTTP 200 body saved to diagnostics.");
+      } catch (error) {
+        log(`morning: failed to save HTTP 200 body: ${shortError(error)}`);
+      }
+
+      const match = body.match(/\b(\d{2}:\d{2}:\d{2})\b/);
+      const fact = match ? match[1] : null;
+
+      if (!fact) {
+        throw new Error("morning: HTTP 200 accepted but no time found in response body");
+      }
+
+      log(`morning: HTTP 200 accepted. First response time = ${fact}`);
+
+      return {
+        alreadyDone: false,
+        fact,
+        state,
+        httpAccepted: true,
+      };
+    }
+
+    log("evening: HTTP 200 accepted. Waiting for Bilky page to expose the saved fact.");
+
     let verifiedState = null;
     let fact = null;
     const factDeadline = Date.now() + 15000;
@@ -487,20 +515,17 @@ export function createBilkyCore({
 
       try {
         verifiedState = await readDayState(page, date);
-        fact =
-          mode === "morning"
-            ? verifiedState.morning.fact
-            : verifiedState.evening.fact;
+        fact = verifiedState.evening.fact;
       } catch {}
 
       if (fact) {
-        log(`${mode}: verified fact from page = ${fact}`);
+        log(`evening: verified fact from page = ${fact}`);
         break;
       }
     }
 
     if (!fact) {
-      throw new Error(`${mode}: HTTP 200 accepted but saved fact was not found in the Bilky page`);
+      throw new Error("evening: HTTP 200 accepted but saved fact was not found in the Bilky page");
     }
 
     return {
