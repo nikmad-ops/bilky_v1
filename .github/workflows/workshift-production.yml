@@ -100,38 +100,15 @@ jobs:
         run: |
           set -euo pipefail
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
-          FACT=""
-          DURATION=""
-          SIGNED="false"
-          ALREADY="false"
-
-          if [ -f run-result.json ]; then
-            FACT=$(jq -r '.fact // empty' run-result.json)
-            DURATION=$(jq -r '.duration // empty' run-result.json)
-            SIGNED=$(jq -r '.signed // false' run-result.json)
-            ALREADY=$(jq -r '.alreadyDone // false' run-result.json)
-          fi
+          FACT=$(jq -r '.fact // empty' run-result.json 2>/dev/null || true)
+          DURATION=$(jq -r '.duration // empty' run-result.json 2>/dev/null || true)
 
           if [ "${ACTION}" = "morning" ]; then
-            LABEL="УТРО"
-            if [ -n "${FACT}" ]; then
-              MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Факт: ${FACT:0:5}"
-            elif [ "${ALREADY}" = "true" ]; then
-              MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Уже выполнено."
-            else
-              MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Выполнено."
-            fi
+            MESSAGE="✅ Bilky ${DATE}: Morning. Fact: ${FACT:0:5}"
           else
-            LABEL="ВЕЧЕР"
-            MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Выполнено"
-            if [ -n "${FACT}" ]; then
-              MESSAGE="${MESSAGE}. Факт: ${FACT:0:5}"
-            fi
-            if [ "${SIGNED}" = "true" ]; then
-              MESSAGE="${MESSAGE}. Signed"
-            fi
+            MESSAGE="✅ Bilky ${DATE}: Evening. Fact: ${FACT:0:5}"
             if [ -n "${DURATION}" ]; then
-              MESSAGE="${MESSAGE}. DAY ${DURATION}"
+              MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
             fi
           fi
 
@@ -151,7 +128,7 @@ jobs:
         run: |
           set -euo pipefail
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
-          if [ "${ACTION}" = "morning" ]; then LABEL="УТРО"; else LABEL="ВЕЧЕР"; fi
+          if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
           MESSAGE="❌ Bilky ${DATE}: ${LABEL}. ERROR"
 
           curl --fail --silent --show-error \
