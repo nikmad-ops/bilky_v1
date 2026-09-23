@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {
   TIMEZONE,
   createBilkyCore,
@@ -10,18 +11,16 @@ const {
   BILKY_NIF,
   BILKY_PASSWORD,
   BROWSERLESS_TOKEN,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID,
   REQUEST_CHAT_ID,
+  TELEGRAM_CHAT_ID,
 } = process.env;
 
 for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
   BROWSERLESS_TOKEN,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_CHAT_ID,
   REQUEST_CHAT_ID,
+  TELEGRAM_CHAT_ID,
 })) {
   if (!value) {
     throw new Error(
@@ -362,38 +361,6 @@ function currentMadridMinutes() {
   );
 }
 
-async function sendTelegram(
-  message
-) {
-  const response =
-    await fetch(
-      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method:
-          "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-        body:
-          JSON.stringify({
-            chat_id:
-              TELEGRAM_CHAT_ID,
-            text:
-              message,
-          }),
-      }
-    );
-
-  if (
-    !response.ok
-  ) {
-    throw new Error(
-      `Telegram failed: ${response.status} ${await response.text()}`
-    );
-  }
-}
-
 function classifyDay(
   date,
   state,
@@ -659,24 +626,16 @@ async function buildStatus({
 }
 
 async function main() {
-  let report;
-
-  try {
-    report =
-      await bilky.runWithRetries(
-        "Bilky status",
-        buildStatus
-      );
-  } catch (error) {
-    await sendTelegram(
-      `❌ Bilky STATUS. ERROR after 3 attempts: ${error.cause?.message || error.message}`
+  const report =
+    await bilky.runWithRetries(
+      "Bilky status",
+      buildStatus
     );
 
-    throw error;
-  }
-
-  await sendTelegram(
-    report
+  fs.writeFileSync(
+    "status-result.txt",
+    report,
+    "utf8"
   );
 
   log(
@@ -684,4 +643,19 @@ async function main() {
   );
 }
 
-await main();
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    try {
+      fs.writeFileSync(
+        "status-error.txt",
+        String(error?.cause?.message || error?.message || error || "Unknown error")
+          .split("\n")[0]
+          .slice(0, 300),
+        "utf8"
+      );
+    } catch {}
+
+    console.error(error);
+    process.exit(1);
+  });
