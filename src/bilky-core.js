@@ -190,10 +190,23 @@ export function createBilkyCore({
     let lastNavigationError = null;
 
     for (let navAttempt = 1; navAttempt <= 2; navAttempt += 1) {
+      if (solverEnabled) {
+        // Cloudflare may finish the navigation itself after solving the challenge.
+        // Give it a moment and do not start a competing page.goto() if we are
+        // already on the requested workshift page.
+        await sleep(2500);
+
+        if (page.url().startsWith(WORKSHIFT_URL)) {
+          log("Workshift URL already reached after CAPTCHA; skipping page.goto.");
+          lastNavigationError = null;
+          break;
+        }
+      }
+
       try {
         await page.goto(WORKSHIFT_URL, {
           waitUntil: "commit",
-          timeout: 15000,
+          timeout: solverEnabled ? 30000 : 15000,
         });
         lastNavigationError = null;
         break;
@@ -206,6 +219,12 @@ export function createBilkyCore({
 
         log(`Workshift navigation interrupted; waiting for solver to settle before retry: ${shortError(error)}`);
         await waitForSolverIdle(page, 15000);
+
+        if (page.url().startsWith(WORKSHIFT_URL)) {
+          log("Workshift URL reached while solver settled; skipping retry page.goto.");
+          lastNavigationError = null;
+          break;
+        }
       }
     }
 
