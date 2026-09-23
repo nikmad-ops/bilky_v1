@@ -1,0 +1,49 @@
+name: Bilky TEMP Full Test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-full-test.yml'
+
+jobs:
+  full-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run Bilky Evening safely
+        env:
+          ACTION: evening
+          EXECUTE: 'true'
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: npm run workshift
+      - name: Telegram success
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          FACT=$(jq -r '.fact // empty' run-result.json 2>/dev/null || true)
+          DURATION=$(jq -r '.duration // empty' run-result.json 2>/dev/null || true)
+          MESSAGE="✅ Bilky ${DATE}: Evening. Fact: ${FACT:0:5}"
+          if [ -n "${DURATION}" ]; then MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"; fi
+          curl --fail --silent --show-error --request POST --header 'Content-Type: application/json' --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+      - name: Telegram failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        shell: bash
+        run: |
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          MESSAGE="❌ Bilky ${DATE}: Evening. ERROR"
+          curl --fail --silent --show-error --request POST --header 'Content-Type: application/json' --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null || true
