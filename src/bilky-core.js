@@ -187,48 +187,24 @@ export function createBilkyCore({
       await waitForSolverIdle(page, 15000);
     }
 
-    let lastNavigationError = null;
-
-    for (let navAttempt = 1; navAttempt <= 2; navAttempt += 1) {
-      if (solverEnabled) {
-        // Cloudflare may finish the navigation itself after solving the challenge.
-        // Give it a moment and do not start a competing page.goto() if we are
-        // already on the requested workshift page.
-        await sleep(2500);
-
-        if (page.url().startsWith(WORKSHIFT_URL)) {
-          log("Workshift URL already reached after CAPTCHA; skipping page.goto.");
-          lastNavigationError = null;
-          break;
-        }
-      }
-
-      try {
+    if (solverEnabled) {
+      // Cloudflare can complete the navigation itself after the challenge.
+      // Wait briefly and avoid a competing navigation if we are already there.
+      await sleep(2500);
+      if (page.url().startsWith(WORKSHIFT_URL)) {
+        log("Workshift URL already reached after CAPTCHA; skipping page.goto.");
+      } else {
         await page.goto(WORKSHIFT_URL, {
           waitUntil: "commit",
-          timeout: solverEnabled ? 30000 : 15000,
+          timeout: 30000,
         });
-        lastNavigationError = null;
-        break;
-      } catch (error) {
-        lastNavigationError = error;
-
-        if (!solverEnabled || navAttempt === 2) {
-          throw error;
-        }
-
-        log(`Workshift navigation interrupted; waiting for solver to settle before retry: ${shortError(error)}`);
-        await waitForSolverIdle(page, 15000);
-
-        if (page.url().startsWith(WORKSHIFT_URL)) {
-          log("Workshift URL reached while solver settled; skipping retry page.goto.");
-          lastNavigationError = null;
-          break;
-        }
       }
+    } else {
+      await page.goto(WORKSHIFT_URL, {
+        waitUntil: "commit",
+        timeout: 15000,
+      });
     }
-
-    if (lastNavigationError) throw lastNavigationError;
 
     const container = page.locator(`#container_${date}`);
     const deadline = Date.now() + 20000;
@@ -473,6 +449,11 @@ export function createBilkyCore({
       throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
     }
 
+    // Commit point: once clock-hour returns HTTP 200, the click may already be
+    // recorded in Bilky. Any later error is informational only and must never
+    // cause the operation to be repeated.
+    setStage(`committed-${mode}`);
+
     const body = await response.text();
 
     if (mode === "morning") {
@@ -661,6 +642,11 @@ export function createBilkyCore({
         );
 
         writeDiagnostic(attempt, stage, error, page);
+
+        if (String(stage).startsWith("committed-")) {
+          log(`${label}: HTTP 200 commit point reached; retry is disabled to avoid duplicate clocking.`);
+          break;
+        }
 
         if (attempt === 1) {
           log(`${label}: retrying immediately with CAPTCHA solver`);
