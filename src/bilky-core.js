@@ -61,6 +61,19 @@ function extractFactTime(value) {
   return match ? match[1] : null;
 }
 
+function extractClockFactsFromResponse(body) {
+  const matches = [
+    ...String(body || "").matchAll(
+      /data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["'][^>]*class=["'][^"']*fe-clock|class=["'][^"']*fe-clock[^"']*["'][^>]*data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["']/gi
+    ),
+  ].map((match) => match[1] || match[2]).filter(Boolean);
+
+  return {
+    morning: matches[0] || null,
+    evening: matches[1] || null,
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -193,36 +206,39 @@ export function createBilkyCore({
 
     if (solverEnabled) {
       await waitForSolverIdle(page, 15000);
+    }
 
-      const container = page.locator(`#container_${date}`);
-      const settleDeadline = Date.now() + 10000;
+    const workshiftLink = page
+      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
+      .first();
 
-      while (Date.now() < settleDeadline) {
-        if (await container.isVisible().catch(() => false)) {
-          log("Workshift ready after CAPTCHA auto-navigation; skipping page.goto.");
-          return;
-        }
+    let openedByClick = false;
+    const linkDeadline = Date.now() + 10000;
 
-        if (page.url().startsWith(WORKSHIFT_URL)) {
-          break;
-        }
-
-        await sleep(500);
+    while (Date.now() < linkDeadline) {
+      if (await workshiftLink.count()) {
+        log("Opening Workshift from Dashboard link.");
+        await workshiftLink.click();
+        openedByClick = true;
+        break;
       }
 
-      if (!page.url().startsWith(WORKSHIFT_URL)) {
-        log("Workshift was not reached automatically after CAPTCHA; using one fallback page.goto.");
-        await page.goto(WORKSHIFT_URL, {
-          waitUntil: "commit",
-          timeout: 30000,
-        });
-      } else {
-        log("Workshift URL reached after CAPTCHA; skipping page.goto.");
+      const challenge = await securityVerificationDetected(page);
+      if (challenge && !solverEnabled) {
+        throw new Error("Cloudflare security verification blocked Bilky dashboard");
       }
-    } else {
+      if (challenge && solverEnabled) {
+        await waitForSolverIdle(page, 15000);
+      }
+
+      await sleep(300);
+    }
+
+    if (!openedByClick) {
+      log("Workshift link not found on Dashboard; using one fallback direct navigation.");
       await page.goto(WORKSHIFT_URL, {
         waitUntil: "commit",
-        timeout: 15000,
+        timeout: solverEnabled ? 30000 : 15000,
       });
     }
 
@@ -236,11 +252,9 @@ export function createBilkyCore({
       }
 
       const challenge = await securityVerificationDetected(page);
-
       if (challenge && !solverEnabled) {
-        throw new Error("Cloudflare security verification blocked Bilky page");
+        throw new Error("Cloudflare security verification blocked Bilky Workshift");
       }
-
       if (challenge && solverEnabled) {
         await waitForSolverIdle(page, 15000);
       }
@@ -409,16 +423,35 @@ export function createBilkyCore({
     log("---------------------");
   }
 
-  async function clock(page, state, mode, date, setStage) {
-    const side = mode === "morning" ? state.morning : state.evening;
+  async function clock(page, mode, date, setStage) {
+    const containerSelector = `#container_${date}`;
+    const row = page
+      .locator(containerSelector)
+      .locator("tr")
+      .filter({ hasText: /First shift|Primer turno/ })
+      .first();
+
+    if (!(await row.count())) {
+      throw new Error(`First shift row not found for ${date}`);
+    }
+
+    const cells = row.locator("td.hr-container");
+    const targetIndex = mode === "morning" ? 0 : 1;
+    if ((await cells.count()) <= targetIndex) {
+      throw new Error(`${mode}: target shift cell not found`);
+    }
+
+    const cell = cells.nth(targetIndex);
+    const side = await readShiftCell(cell);
     const expectedPlan = mode === "morning" ? "08:00" : "16:00";
 
     if (side.fact) {
-      log(`${mode}: already clocked at ${side.fact}. No duplicate click.`);
+      log(`${mode}: already clocked at ${side.fact}. No click needed.`);
       return {
         alreadyDone: true,
         fact: side.fact,
-        state,
+        morningFact: mode === "morning" ? side.fact : null,
+        eveningFact: mode === "evening" ? side.fact : null,
       };
     }
 
@@ -429,25 +462,13 @@ export function createBilkyCore({
     }
 
     if (!side.buttonExists) {
-      throw new Error(`${mode}: Clock in/out button does not exist`);
+      throw new Error(`${mode}: button missing and saved fact not found`);
     }
 
     if (!side.buttonEnabled) {
       throw new Error(`${mode}: Clock in/out button is disabled`);
     }
 
-    if (mode === "evening" && !state.morning.fact) {
-      throw new Error("Evening blocked because morning fact is missing");
-    }
-
-    const row = page
-      .locator(state.containerSelector)
-      .locator("tr")
-      .filter({ hasText: /First shift|Primer turno/ })
-      .first();
-
-    const cells = row.locator("td.hr-container");
-    const cell = mode === "morning" ? cells.nth(0) : cells.nth(1);
     const button = cell.locator("a.clock").first();
 
     setStage(`click-${mode}`);
@@ -469,70 +490,39 @@ export function createBilkyCore({
       throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
     }
 
-    // Commit point: once clock-hour returns HTTP 200, the click may already be
-    // recorded in Bilky. Any later error is informational only and must never
-    // cause the operation to be repeated.
     setStage(`committed-${mode}`);
 
     const body = await response.text();
 
-    if (mode === "morning") {
-      try {
-        fs.writeFileSync(
-          `${diagnosticsDir}/clock-morning-http-200-body.txt`,
-          body,
-          "utf8"
-        );
-        log("morning: full HTTP 200 body saved to diagnostics.");
-      } catch (error) {
-        log(`morning: failed to save HTTP 200 body: ${shortError(error)}`);
-      }
-
-      const match = body.match(/\b(\d{2}:\d{2}:\d{2})\b/);
-      const fact = match ? match[1] : null;
-
-      if (!fact) {
-        throw new Error("morning: HTTP 200 accepted but no time found in response body");
-      }
-
-      log(`morning: HTTP 200 accepted. First response time = ${fact}`);
-
-      return {
-        alreadyDone: false,
-        fact,
-        state,
-        httpAccepted: true,
-      };
+    try {
+      fs.writeFileSync(
+        `${diagnosticsDir}/clock-${mode}-http-200-body.txt`,
+        body,
+        "utf8"
+      );
+      log(`${mode}: full HTTP 200 body saved to diagnostics.`);
+    } catch (error) {
+      log(`${mode}: failed to save HTTP 200 body: ${shortError(error)}`);
     }
 
-    log("evening: HTTP 200 accepted. Waiting for Bilky page to expose the saved fact.");
-
-    let verifiedState = null;
-    let fact = null;
-    const factDeadline = Date.now() + 15000;
-
-    while (Date.now() < factDeadline) {
-      await sleep(500);
-
-      try {
-        verifiedState = await readDayState(page, date);
-        fact = verifiedState.evening.fact;
-      } catch {}
-
-      if (fact) {
-        log(`evening: verified fact from page = ${fact}`);
-        break;
-      }
-    }
+    const facts = extractClockFactsFromResponse(body);
+    const fact = mode === "morning" ? facts.morning : facts.evening;
 
     if (!fact) {
-      throw new Error("evening: HTTP 200 accepted but saved fact was not found in the Bilky page");
+      throw new Error(
+        `${mode}: HTTP 200 accepted but target fact was not found in response body`
+      );
     }
+
+    log(
+      `${mode}: HTTP 200 fact parsed. morning=${facts.morning || "NONE"} evening=${facts.evening || "NONE"}`
+    );
 
     return {
       alreadyDone: false,
       fact,
-      state: verifiedState || state,
+      morningFact: facts.morning,
+      eveningFact: facts.evening,
       httpAccepted: true,
     };
   }
