@@ -63,20 +63,23 @@ function extractFactTime(value) {
 
 function extractClockFactsFromResponse(body, date) {
   const html = String(body || "");
-  const marker = `id="container_${date}"`;
-  const markerSingle = `id='container_${date}'`;
-  const start = Math.max(html.indexOf(marker), html.indexOf(markerSingle));
 
-  let scoped = html;
-  if (start >= 0) {
-    const tail = html.slice(start);
-    const nextContainer = tail.slice(1).search(/id=["']container_\d{4}-\d{2}-\d{2}["']/i);
-    scoped = nextContainer >= 0 ? tail.slice(0, nextContainer + 1) : tail;
+  const escapedDate = String(date).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const dateMarker = new RegExp(
+    `name=["\']date["\'][^>]*value=["\']${escapedDate}["\']|value=["\']${escapedDate}["\'][^>]*name=["\']date["\']`,
+    "i"
+  );
+
+  if (!dateMarker.test(html)) {
+    return {
+      morning: null,
+      evening: null,
+    };
   }
 
   const cells = [
-    ...scoped.matchAll(
-      /<td\b[^>]*class=["'][^"']*\bhr-container\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi
+    ...html.matchAll(
+      /<td\b[^>]*class=["\'][^"\']*\bhr-container\b[^"\']*["\'][^>]*>([\s\S]*?)<\/td>/gi
     ),
   ].map((match) => match[1]);
 
@@ -84,7 +87,7 @@ function extractClockFactsFromResponse(body, date) {
     if (!cellHtml) return null;
 
     const icon = cellHtml.match(
-      /<i\b(?=[^>]*\bfe-clock\b)(?=[^>]*data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["'])[^>]*>/i
+      /<i\b(?=[^>]*\bfe-clock\b)(?=[^>]*data-original-title=["\']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["\'])[^>]*>/i
     );
 
     return icon ? icon[1] : null;
