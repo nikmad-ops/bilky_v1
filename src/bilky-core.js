@@ -61,10 +61,21 @@ function extractFactTime(value) {
   return match ? match[1] : null;
 }
 
-function extractClockFactsFromResponse(body) {
+function extractClockFactsFromResponse(body, date) {
   const html = String(body || "");
+  const marker = `id="container_${date}"`;
+  const markerSingle = `id='container_${date}'`;
+  const start = Math.max(html.indexOf(marker), html.indexOf(markerSingle));
+
+  let scoped = html;
+  if (start >= 0) {
+    const tail = html.slice(start);
+    const nextContainer = tail.slice(1).search(/id=["']container_\d{4}-\d{2}-\d{2}["']/i);
+    scoped = nextContainer >= 0 ? tail.slice(0, nextContainer + 1) : tail;
+  }
+
   const cells = [
-    ...html.matchAll(
+    ...scoped.matchAll(
       /<td\b[^>]*class=["'][^"']*\bhr-container\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi
     ),
   ].map((match) => match[1]);
@@ -556,13 +567,19 @@ export function createBilkyCore({
       log(`${mode}: failed to save HTTP 200 body: ${shortError(error)}`);
     }
 
-    const facts = extractClockFactsFromResponse(body);
+    const facts = extractClockFactsFromResponse(body, date);
     const fact = mode === "morning" ? facts.morning : facts.evening;
 
     if (!fact) {
-      throw new Error(
-        `${mode}: HTTP 200 accepted but target fact was not found in response body`
-      );
+      log(`${mode}: HTTP 200 committed, but target fact was not found in response body.`);
+      return {
+        alreadyDone: false,
+        fact: null,
+        morningFact: facts.morning,
+        eveningFact: facts.evening,
+        httpAccepted: true,
+        factParseError: true,
+      };
     }
 
     log(
@@ -575,6 +592,7 @@ export function createBilkyCore({
       morningFact: facts.morning,
       eveningFact: facts.evening,
       httpAccepted: true,
+      factParseError: false,
     };
   }
 
