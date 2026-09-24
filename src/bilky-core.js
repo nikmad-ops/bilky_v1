@@ -162,7 +162,7 @@ export function createBilkyCore({
     );
   }
 
-  async function waitForSolverIdle(page, timeoutMs = 15000) {
+  async function waitForSolverIdle(page, timeoutMs = 30000) {
     const state = stateFor(page);
     const deadline = Date.now() + timeoutMs;
     let clearSince = 0;
@@ -205,7 +205,7 @@ export function createBilkyCore({
     setStage("open-workshift");
 
     if (solverEnabled) {
-      await waitForSolverIdle(page, 15000);
+      await waitForSolverIdle(page, 30000);
     }
 
     const workshiftLink = page
@@ -228,7 +228,7 @@ export function createBilkyCore({
         throw new Error("Cloudflare security verification blocked Bilky dashboard");
       }
       if (challenge && solverEnabled) {
-        await waitForSolverIdle(page, 15000);
+        await waitForSolverIdle(page, 30000);
       }
 
       await sleep(300);
@@ -243,7 +243,8 @@ export function createBilkyCore({
     }
 
     const container = page.locator(`#container_${date}`);
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + (solverEnabled ? 45000 : 20000);
+    let solverWaitLogged = false;
 
     while (Date.now() < deadline) {
       if (await container.isVisible().catch(() => false)) {
@@ -255,14 +256,20 @@ export function createBilkyCore({
       if (challenge && !solverEnabled) {
         throw new Error("Cloudflare security verification blocked Bilky Workshift");
       }
-      if (challenge && solverEnabled) {
-        await waitForSolverIdle(page, 15000);
+
+      if (challenge && solverEnabled && !solverWaitLogged) {
+        log("Cloudflare detected on Workshift; waiting for Browserless solver to finish.");
+        solverWaitLogged = true;
       }
 
       await sleep(300);
     }
 
-    throw new Error("Bilky Workshift did not become ready");
+    throw new Error(
+      solverEnabled
+        ? "Cloudflare solver did not reach Bilky Workshift within 45 seconds"
+        : "Bilky Workshift did not become ready"
+    );
   }
 
   async function loginAndOpenWorkshift(page, setStage, solverEnabled, date) {
@@ -311,7 +318,7 @@ export function createBilkyCore({
     log("Login OK.");
 
     if (solverEnabled) {
-      await waitForSolverIdle(page, 15000);
+      await waitForSolverIdle(page, 30000);
     }
 
     await openWorkshift(page, setStage, solverEnabled, date);
@@ -491,6 +498,26 @@ export function createBilkyCore({
     }
 
     setStage(`committed-${mode}`);
+
+    try {
+      fs.writeFileSync(
+        "run-committed.json",
+        JSON.stringify(
+          {
+            date,
+            action: mode,
+            httpStatus: response.status(),
+            committedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      log(`${mode}: HTTP 200 commit marker saved.`);
+    } catch (error) {
+      log(`${mode}: failed to save commit marker: ${shortError(error)}`);
+    }
 
     const body = await response.text();
 
