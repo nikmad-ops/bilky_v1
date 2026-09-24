@@ -1,0 +1,20 @@
+name: Bilky TEMP Audit Check
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-audit-check.yml'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: JS syntax
+        run: |
+          node --check src/bilky-core.js
+          node --check src/workshift.js
+          node --check src/status.js
+      - name: YAML syntax
+        run: ruby -e 'require "yaml"; YAML.load_file(".github/workflows/workshift-production.yml"); puts "YAML OK"'
