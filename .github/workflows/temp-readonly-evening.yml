@@ -1,0 +1,21 @@
+name: Bilky TEMP Read Only Evening
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-readonly-evening.yml'
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Read only evening cell
+        env:
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: node src/temp-readonly-evening.js
