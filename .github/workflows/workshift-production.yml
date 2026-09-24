@@ -145,6 +145,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
           FACT=$(jq -r '.fact // empty' run-result.json 2>/dev/null || true)
           DURATION=$(jq -r '.duration // empty' run-result.json 2>/dev/null || true)
@@ -162,51 +163,9 @@ jobs:
             else
               MESSAGE="✅ Bilky ${DATE}: Evening. Fact: ${FACT:0:5}"
             fi
+
             if [ -n "${DURATION}" ]; then
-              MESSAGE="${MESSAGE}"
-          curl --fail --silent --show-error \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
-
-      - name: Telegram failure
-        if: failure() && steps.safety.outputs.allowed == 'true'
-        env:
-          ACTION: ${{ inputs.action }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
-          if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
-
-          if [ -f run-committed.json ]; then
-            MESSAGE="⚠️ Bilky ${DATE}: ${LABEL}. HTTP 200 accepted, but result parsing/reporting failed. No retry was performed."
-          else
-            MESSAGE="❌ Bilky ${DATE}: ${LABEL}. ERROR"
-          fi
-
-          curl --fail --silent --show-error \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
-
-      - name: Upload Bilky diagnostics
-        if: always() && steps.safety.outputs.allowed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bilky-workshift-diagnostics-${{ github.run_id }}
-          path: |
-            diagnostics/
-            run-result.json
-            run-error.txt
-            run-committed.json
-          if-no-files-found: ignore
-          retention-days: 14
-\n'"Full working day: ${DURATION}"
+              MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
             fi
           fi
 
@@ -225,6 +184,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
           if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
 
