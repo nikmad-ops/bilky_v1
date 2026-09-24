@@ -109,7 +109,16 @@ jobs:
             fi
 
             if [ "${SLOT}" -lt 5 ]; then
+              if [ "${ACTION}" = "morning" ]; then WINDOW_END=0815; else WINDOW_END=1635; fi
+
               NEXT_SLOT_EPOCH=$((SERIES_START_EPOCH + SLOT * 300))
+              NEXT_SLOT_HHMM=$(TZ=Europe/Madrid date -d "@${NEXT_SLOT_EPOCH}" +%H%M)
+
+              if [ "${NEXT_SLOT_HHMM}" -gt "${WINDOW_END}" ]; then
+                echo "Next fixed slot ${NEXT_SLOT_HHMM} is outside the allowed ${ACTION} window ending at ${WINDOW_END}. Stopping."
+                break
+              fi
+
               NOW_EPOCH=$(date +%s)
               WAIT_SECONDS=$((NEXT_SLOT_EPOCH - NOW_EPOCH))
 
