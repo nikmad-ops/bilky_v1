@@ -19,7 +19,7 @@ on:
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
 
     steps:
       - name: Safety gate
@@ -173,5 +173,6 @@ jobs:
             diagnostics/
             run-result.json
             run-error.txt
+            run-committed.json
           if-no-files-found: ignore
           retention-days: 14
