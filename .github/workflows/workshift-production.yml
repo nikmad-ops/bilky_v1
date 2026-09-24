@@ -1,4 +1,5 @@
 name: Bilky Production
+run-name: Bilky ${{ inputs.action }} ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -15,11 +16,15 @@ on:
         required: true
         default: false
         type: boolean
+      request_id:
+        description: 'Scheduler request id'
+        required: true
+        type: string
 
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 15
 
     steps:
       - name: Safety gate
@@ -46,14 +51,14 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0815 ]; then
-                echo "Blocked: morning execution outside 07:55-08:15 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0820 ]; then
+                echo "Blocked: morning execution outside 07:55-08:20 Europe/Madrid."
                 exit 1
               fi
               ;;
             evening)
-              if [ "${MADRID_TIME}" -lt 1615 ] || [ "${MADRID_TIME}" -gt 1635 ]; then
-                echo "Blocked: evening execution outside 16:15-16:35 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 1615 ] || [ "${MADRID_TIME}" -gt 1640 ]; then
+                echo "Blocked: evening execution outside 16:15-16:40 Europe/Madrid."
                 exit 1
               fi
               ;;
@@ -90,51 +95,9 @@ jobs:
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
         shell: bash
         run: |
-          set -u
-
+          set -euo pipefail
           rm -f run-result.json run-error.txt run-committed.json
-          SERIES_START_EPOCH=$(date +%s)
-
-          for SLOT in 1 2 3 4 5; do
-            echo "===== TIME SLOT ${SLOT}/5 ====="
-
-            if npm run workshift; then
-              echo "Bilky completed successfully in slot ${SLOT}/5."
-              exit 0
-            fi
-
-            if [ -f run-committed.json ]; then
-              echo "HTTP 200 commit marker found. Refusing any further retry to avoid duplicate clocking."
-              exit 1
-            fi
-
-            if [ "${SLOT}" -lt 5 ]; then
-              if [ "${ACTION}" = "morning" ]; then WINDOW_END=0815; else WINDOW_END=1635; fi
-
-              NEXT_SLOT_EPOCH=$((SERIES_START_EPOCH + SLOT * 300))
-              NEXT_SLOT_HHMM=$(TZ=Europe/Madrid date -d "@${NEXT_SLOT_EPOCH}" +%H%M)
-
-              if [ "${NEXT_SLOT_HHMM}" -gt "${WINDOW_END}" ]; then
-                echo "Next fixed slot ${NEXT_SLOT_HHMM} is outside the allowed ${ACTION} window ending at ${WINDOW_END}. Stopping."
-                break
-              fi
-
-              NOW_EPOCH=$(date +%s)
-              WAIT_SECONDS=$((NEXT_SLOT_EPOCH - NOW_EPOCH))
-
-              if [ "${WAIT_SECONDS}" -gt 0 ]; then
-                echo "Slot ${SLOT}/5 failed before commit. Waiting ${WAIT_SECONDS}s until the next fixed 5-minute slot."
-                sleep "${WAIT_SECONDS}"
-              else
-                echo "Next fixed slot time already reached; continuing immediately."
-              fi
-
-              rm -f run-error.txt
-            fi
-          done
-
-          echo "Bilky failed in all 5 time slots."
-          exit 1
+          npm run workshift
 
       - name: Telegram success
         if: success() && steps.safety.outputs.allowed == 'true'
@@ -167,31 +130,6 @@ jobs:
             if [ -n "${DURATION}" ]; then
               MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
             fi
-          fi
-
-          curl --fail --silent --show-error \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
-
-      - name: Telegram failure
-        if: failure() && steps.safety.outputs.allowed == 'true'
-        env:
-          ACTION: ${{ inputs.action }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
-          if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
-
-          if [ -f run-committed.json ]; then
-            MESSAGE="⚠️ Bilky ${DATE}: ${LABEL}. HTTP 200 accepted, but result parsing/reporting failed. No retry was performed."
-          else
-            MESSAGE="❌ Bilky ${DATE}: ${LABEL}. ERROR"
           fi
 
           curl --fail --silent --show-error \
