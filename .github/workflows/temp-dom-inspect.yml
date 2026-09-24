@@ -1,0 +1,22 @@
+name: Bilky TEMP DOM Inspect
+on:
+  push:
+    paths:
+      - 'src/temp-dom-inspect.js'
+      - '.github/workflows/temp-dom-inspect.yml'
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Inspect landing DOM
+        env:
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: node src/temp-dom-inspect.js
