@@ -245,15 +245,25 @@ export function createBilkyCore({
       await sleep(300);
     }
 
+    const container = page.locator(`#container_${date}`);
+
     if (!openedByClick) {
-      log("Workshift link not found on Dashboard; using one fallback direct navigation.");
-      await page.goto(WORKSHIFT_URL, {
-        waitUntil: "commit",
-        timeout: solverEnabled ? 30000 : 15000,
-      });
+      if (await container.isVisible().catch(() => false)) {
+        log("Workshift already ready after auto-navigation; direct fallback skipped.");
+        return;
+      }
+
+      if (page.url().startsWith(WORKSHIFT_URL)) {
+        log("Workshift URL already reached after auto-navigation; direct fallback skipped.");
+      } else {
+        log("Workshift link not found on Dashboard; using one fallback direct navigation.");
+        await page.goto(WORKSHIFT_URL, {
+          waitUntil: "commit",
+          timeout: solverEnabled ? 30000 : 15000,
+        });
+      }
     }
 
-    const container = page.locator(`#container_${date}`);
     const deadline = Date.now() + (solverEnabled ? 45000 : 20000);
     let solverWaitLogged = false;
 
@@ -327,10 +337,6 @@ export function createBilkyCore({
     }
 
     log("Login OK.");
-
-    if (solverEnabled) {
-      await waitForSolverIdle(page, 30000);
-    }
 
     await openWorkshift(page, setStage, solverEnabled, date);
   }
@@ -465,10 +471,17 @@ export function createBilkyCore({
 
     if (side.fact) {
       log(`${mode}: already clocked at ${side.fact}. No click needed.`);
+
+      let morningFact = mode === "morning" ? side.fact : null;
+      if (mode === "evening") {
+        const morningSide = await readShiftCell(cells.nth(0));
+        morningFact = morningSide.fact;
+      }
+
       return {
         alreadyDone: true,
         fact: side.fact,
-        morningFact: mode === "morning" ? side.fact : null,
+        morningFact,
         eveningFact: mode === "evening" ? side.fact : null,
       };
     }
