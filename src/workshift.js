@@ -59,45 +59,35 @@ function writeResult(result) {
 }
 
 async function runAction({ page, setStage }) {
-  setStage("read-current-state");
-
-  const state = await bilky.readDayState(page, targetDate);
-  bilky.printState(state);
+  setStage("target-cell");
 
   if (ACTION === "morning") {
     const result = await bilky.clock(
       page,
-      state,
       "morning",
       targetDate,
       setStage
     );
 
     return {
-      fact: result.fact || state.morning.fact || null,
+      fact: result.fact || null,
       alreadyDone: result.alreadyDone,
       httpAccepted: Boolean(result.httpAccepted || result.alreadyDone),
     };
   }
 
-  const clockResult = await bilky.clock(
+  const result = await bilky.clock(
     page,
-    state,
     "evening",
     targetDate,
     setStage
   );
 
-  const eveningFact =
-    clockResult.fact ||
-    state.evening.fact ||
-    null;
-
   return {
-    fact: eveningFact,
-    alreadyDone: clockResult.alreadyDone,
-    httpAccepted: Boolean(clockResult.httpAccepted || clockResult.alreadyDone),
-    duration: dayDuration(state.morning.fact, eveningFact),
+    fact: result.fact || null,
+    alreadyDone: result.alreadyDone,
+    httpAccepted: Boolean(result.httpAccepted || result.alreadyDone),
+    duration: dayDuration(result.morningFact, result.eveningFact || result.fact),
   };
 }
 
