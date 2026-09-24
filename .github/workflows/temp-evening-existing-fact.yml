@@ -1,0 +1,32 @@
+name: TEMP Evening Existing Fact Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/temp-evening-existing-fact.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run Evening path
+        env:
+          ACTION: evening
+          EXECUTE: 'true'
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: npm run workshift
+      - name: Show result
+        if: always()
+        run: |
+          cat run-result.json 2>/dev/null || true
+          cat run-error.txt 2>/dev/null || true
