@@ -19,7 +19,7 @@ on:
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
 
     steps:
       - name: Safety gate
@@ -46,14 +46,14 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0830 ]; then
-                echo "Blocked: morning execution outside 07:55-08:30 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0815 ]; then
+                echo "Blocked: morning execution outside 07:55-08:15 Europe/Madrid."
                 exit 1
               fi
               ;;
             evening)
-              if [ "${MADRID_TIME}" -lt 1750 ] || [ "${MADRID_TIME}" -gt 1830 ]; then
-                echo "Blocked: evening execution outside 17:50-18:30 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 1615 ] || [ "${MADRID_TIME}" -gt 1635 ]; then
+                echo "Blocked: evening execution outside 16:15-16:35 Europe/Madrid."
                 exit 1
               fi
               ;;
@@ -88,7 +88,29 @@ jobs:
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-        run: npm run workshift
+        shell: bash
+        run: |
+          set -u
+
+          rm -f run-result.json run-error.txt
+
+          for SLOT in 1 2 3 4 5; do
+            echo "===== TIME SLOT ${SLOT}/5 ====="
+
+            if npm run workshift; then
+              echo "Bilky completed successfully in slot ${SLOT}/5."
+              exit 0
+            fi
+
+            if [ "${SLOT}" -lt 5 ]; then
+              echo "Slot ${SLOT}/5 failed before completion. Browserless session is closed; waiting 5 minutes."
+              sleep 300
+              rm -f run-error.txt
+            fi
+          done
+
+          echo "Bilky failed in all 5 time slots."
+          exit 1
 
       - name: Telegram success
         if: success() && steps.safety.outputs.allowed == 'true'
