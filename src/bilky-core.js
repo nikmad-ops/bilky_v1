@@ -62,15 +62,26 @@ function extractFactTime(value) {
 }
 
 function extractClockFactsFromResponse(body) {
-  const matches = [
-    ...String(body || "").matchAll(
-      /data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["'][^>]*class=["'][^"']*fe-clock|class=["'][^"']*fe-clock[^"']*["'][^>]*data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["']/gi
+  const html = String(body || "");
+  const cells = [
+    ...html.matchAll(
+      /<td\b[^>]*class=["'][^"']*\bhr-container\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi
     ),
-  ].map((match) => match[1] || match[2]).filter(Boolean);
+  ].map((match) => match[1]);
+
+  const factFromCell = (cellHtml) => {
+    if (!cellHtml) return null;
+
+    const icon = cellHtml.match(
+      /<i\b(?=[^>]*\bfe-clock\b)(?=[^>]*data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["'])[^>]*>/i
+    );
+
+    return icon ? icon[1] : null;
+  };
 
   return {
-    morning: matches[0] || null,
-    evening: matches[1] || null,
+    morning: factFromCell(cells[0]),
+    evening: factFromCell(cells[1]),
   };
 }
 
