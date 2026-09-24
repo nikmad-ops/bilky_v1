@@ -1,0 +1,29 @@
+name: Bilky TEMP Evening Safe Test 2
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-evening-safe-test-2.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Safe evening test
+        env:
+          ACTION: evening
+          EXECUTE: 'true'
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: npm run workshift
+      - name: Show result
+        if: always()
+        run: |
+          test -f run-result.json && cat run-result.json || true
+          test -f run-error.txt && cat run-error.txt || true
+          test -f run-committed.json && cat run-committed.json || true
