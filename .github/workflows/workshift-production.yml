@@ -156,7 +156,12 @@ jobs:
           set -euo pipefail
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
           if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
-          MESSAGE="❌ Bilky ${DATE}: ${LABEL}. ERROR"
+
+          if [ -f run-committed.json ]; then
+            MESSAGE="⚠️ Bilky ${DATE}: ${LABEL}. HTTP 200 accepted, but result parsing/reporting failed. No retry was performed."
+          else
+            MESSAGE="❌ Bilky ${DATE}: ${LABEL}. ERROR"
+          fi
 
           curl --fail --silent --show-error \
             --request POST \
