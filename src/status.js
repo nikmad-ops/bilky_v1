@@ -469,9 +469,8 @@ function classifyDay(
       relation ===
         0 &&
       nowMinutes <=
-        16 *
-          60 +
-          35
+        17 *
+          60
     ) {
       return {
         line:
