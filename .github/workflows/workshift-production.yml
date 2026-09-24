@@ -92,7 +92,7 @@ jobs:
         run: |
           set -u
 
-          rm -f run-result.json run-error.txt
+          rm -f run-result.json run-error.txt run-committed.json
 
           for SLOT in 1 2 3 4 5; do
             echo "===== TIME SLOT ${SLOT}/5 ====="
@@ -102,8 +102,13 @@ jobs:
               exit 0
             fi
 
+            if [ -f run-committed.json ]; then
+              echo "HTTP 200 commit marker found. Refusing any further retry to avoid duplicate clocking."
+              exit 1
+            fi
+
             if [ "${SLOT}" -lt 5 ]; then
-              echo "Slot ${SLOT}/5 failed before completion. Browserless session is closed; waiting 5 minutes."
+              echo "Slot ${SLOT}/5 failed before commit. Browserless session is closed; waiting 5 minutes."
               sleep 300
               rm -f run-error.txt
             fi
