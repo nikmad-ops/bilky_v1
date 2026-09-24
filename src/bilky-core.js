@@ -556,22 +556,33 @@ export function createBilkyCore({
 
     const body = await response.text();
 
-    try {
-      fs.writeFileSync(
-        `${diagnosticsDir}/clock-${mode}-http-200-body.txt`,
-        body,
-        "utf8"
-      );
-      log(`${mode}: full HTTP 200 body saved to diagnostics.`);
-    } catch (error) {
-      log(`${mode}: failed to save HTTP 200 body: ${shortError(error)}`);
-    }
-
     const facts = extractClockFactsFromResponse(body, date);
     const fact = mode === "morning" ? facts.morning : facts.evening;
 
     if (!fact) {
       log(`${mode}: HTTP 200 committed, but target fact was not found in response body.`);
+
+      try {
+        const redactedBody = body
+          .replace(
+            /(<input\b[^>]*name=["']_token["'][^>]*value=["'])[^"']*(["'][^>]*>)/gi,
+            "$1[REDACTED]$2"
+          )
+          .replace(
+            /(<input\b[^>]*value=["'])[^"']*(["'][^>]*name=["']_token["'][^>]*>)/gi,
+            "$1[REDACTED]$2"
+          );
+
+        fs.writeFileSync(
+          `${diagnosticsDir}/clock-${mode}-http-200-parse-error.html`,
+          redactedBody,
+          "utf8"
+        );
+        log(`${mode}: redacted HTTP 200 body saved because parsing failed.`);
+      } catch (error) {
+        log(`${mode}: failed to save redacted parse-error body: ${shortError(error)}`);
+      }
+
       return {
         alreadyDone: false,
         fact: null,
