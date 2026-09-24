@@ -93,6 +93,7 @@ jobs:
           set -u
 
           rm -f run-result.json run-error.txt run-committed.json
+          SERIES_START_EPOCH=$(date +%s)
 
           for SLOT in 1 2 3 4 5; do
             echo "===== TIME SLOT ${SLOT}/5 ====="
@@ -108,8 +109,17 @@ jobs:
             fi
 
             if [ "${SLOT}" -lt 5 ]; then
-              echo "Slot ${SLOT}/5 failed before commit. Browserless session is closed; waiting 5 minutes."
-              sleep 300
+              NEXT_SLOT_EPOCH=$((SERIES_START_EPOCH + SLOT * 300))
+              NOW_EPOCH=$(date +%s)
+              WAIT_SECONDS=$((NEXT_SLOT_EPOCH - NOW_EPOCH))
+
+              if [ "${WAIT_SECONDS}" -gt 0 ]; then
+                echo "Slot ${SLOT}/5 failed before commit. Waiting ${WAIT_SECONDS}s until the next fixed 5-minute slot."
+                sleep "${WAIT_SECONDS}"
+              else
+                echo "Next fixed slot time already reached; continuing immediately."
+              fi
+
               rm -f run-error.txt
             fi
           done
