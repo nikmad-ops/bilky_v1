@@ -73,6 +73,7 @@ async function runAction({ page, setStage }) {
       fact: result.fact || null,
       alreadyDone: result.alreadyDone,
       httpAccepted: Boolean(result.httpAccepted || result.alreadyDone),
+      factParseError: Boolean(result.factParseError),
     };
   }
 
