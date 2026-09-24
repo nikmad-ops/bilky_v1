@@ -83,11 +83,18 @@ async function runAction({ page, setStage }) {
     setStage
   );
 
+  let morningFact = result.morningFact || null;
+
+  if (result.alreadyDone && !morningFact) {
+    const state = await bilky.readDayState(page, targetDate);
+    morningFact = state.morning.fact || null;
+  }
+
   return {
     fact: result.fact || null,
     alreadyDone: result.alreadyDone,
     httpAccepted: Boolean(result.httpAccepted || result.alreadyDone),
-    duration: dayDuration(result.morningFact, result.eveningFact || result.fact),
+    duration: dayDuration(morningFact, result.eveningFact || result.fact),
   };
 }
 
