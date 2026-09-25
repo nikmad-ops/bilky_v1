@@ -109,7 +109,20 @@ export function createProductionClient({
     return `${BROWSERLESS_WS}/stealth?${params.toString()}`;
   }
 
-  async function createBlankProfile() {
+  async function ensureProfileExists() {
+    const metadataUrl =
+      `${BROWSERLESS_ORIGIN}/profile/${encodeURIComponent(profileName)}?token=${encodeURIComponent(browserlessToken)}`;
+
+    const metadata = await fetch(metadataUrl);
+
+    if (metadata.ok) return;
+
+    if (metadata.status !== 404) {
+      throw new Error(
+        `Browserless profile lookup failed: HTTP ${metadata.status} ${await metadata.text()}`
+      );
+    }
+
     log(`Creating Browserless profile "${profileName}" once.`);
 
     const response = await fetch(
@@ -138,21 +151,15 @@ export function createProductionClient({
       const creationPage = context.pages()[0] || (await context.newPage());
       const cdp = await context.newCDPSession(creationPage);
       await cdp.send("Browserless.saveProfile", { name: profileName });
+      profileCreationConnection = true;
     } finally {
       await creationBrowser.close().catch(() => {});
     }
   }
 
   async function connect() {
-    try {
-      browser = await chromium.connectOverCDP(profileWs());
-    } catch (error) {
-      const message = shortError(error);
-      log(`Profile connection failed: ${message}`);
-      await createBlankProfile();
-      browser = await chromium.connectOverCDP(profileWs());
-      profileCreationConnection = true;
-    }
+    await ensureProfileExists();
+    browser = await chromium.connectOverCDP(profileWs());
 
     const context = browser.contexts()[0];
     if (!context) throw new Error("Browserless default context is unavailable");
