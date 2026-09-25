@@ -51,14 +51,14 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 1610 ] || [ "${MADRID_TIME}" -gt 1640 ]; then
-                echo "Blocked: morning outside temporary Airtop test window 16:10-16:40 Europe/Madrid"
+              if [ "${MADRID_TIME}" -lt 1610 ] || [ "${MADRID_TIME}" -gt 1700 ]; then
+                echo "Blocked: morning outside temporary Airtop test window 16:10-17:00 Europe/Madrid"
                 exit 1
               fi
               ;;
             evening)
-              if [ "${MADRID_TIME}" -lt 1645 ] || [ "${MADRID_TIME}" -gt 1715 ]; then
-                echo "Blocked: evening outside temporary 16:45-17:15 Europe/Madrid"
+              if [ "${MADRID_TIME}" -lt 1705 ] || [ "${MADRID_TIME}" -gt 1735 ]; then
+                echo "Blocked: evening outside temporary 17:05-17:35 Europe/Madrid"
                 exit 1
               fi
               ;;
