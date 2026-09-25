@@ -97,7 +97,6 @@ export function createProductionClient({
   const solverEnabled = Number(attempt) === 3;
   let browser = null;
   let page = null;
-  let profileCreationConnection = false;
   let captchaSeen = false;
 
   function profileWs() {
@@ -151,7 +150,6 @@ export function createProductionClient({
       const creationPage = context.pages()[0] || (await context.newPage());
       const cdp = await context.newCDPSession(creationPage);
       await cdp.send("Browserless.saveProfile", { name: profileName });
-      profileCreationConnection = true;
     } finally {
       await creationBrowser.close().catch(() => {});
     }
@@ -332,25 +330,39 @@ export function createProductionClient({
 
     if (loggedInNow) {
       const container = page.locator(`#container_${madridDate()}`);
-      if (await container.isVisible().catch(() => false)) {
-        return;
-      }
-
       const link = page
         .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
         .first();
 
-      if (!(await link.count())) {
-        throw new Error("Workshift link not found on Bilky dashboard after login");
+      const dashboardDeadline = Date.now() + 10000;
+
+      while (Date.now() < dashboardDeadline) {
+        await guardChallenge("post-login");
+
+        if (await container.isVisible().catch(() => false)) {
+          return;
+        }
+
+        if (await link.count()) {
+          captchaSeen = false;
+          try {
+            await link.click({ noWaitAfter: true });
+          } catch (error) {
+            if (!(await challengeDetected())) throw error;
+          }
+          await guardChallenge("dashboard-workshift");
+          break;
+        }
+
+        await sleep(250);
       }
 
-      captchaSeen = false;
-      try {
-        await link.click({ noWaitAfter: true });
-      } catch (error) {
-        if (!(await challengeDetected())) throw error;
+      if (
+        !(await container.isVisible().catch(() => false)) &&
+        !(await link.count())
+      ) {
+        throw new Error("Workshift link did not appear on Bilky dashboard after login");
       }
-      await guardChallenge("dashboard-workshift");
     }
 
     const container = page.locator(`#container_${madridDate()}`);
@@ -517,6 +529,5 @@ export function createProductionClient({
     execute,
     close,
     solverEnabled,
-    profileCreationConnection: () => profileCreationConnection,
   };
 }
