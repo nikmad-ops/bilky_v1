@@ -10,7 +10,7 @@ import {
 const {
   BILKY_NIF,
   BILKY_PASSWORD,
-  BROWSERLESS_TOKEN,
+  AIRTOP_API_KEY,
   REQUEST_CHAT_ID,
   TELEGRAM_CHAT_ID,
 } = process.env;
@@ -18,7 +18,7 @@ const {
 for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
-  BROWSERLESS_TOKEN,
+  AIRTOP_API_KEY,
   REQUEST_CHAT_ID,
   TELEGRAM_CHAT_ID,
 })) {
@@ -526,8 +526,8 @@ const bilky =
       BILKY_NIF,
     password:
       BILKY_PASSWORD,
-    browserlessToken:
-      BROWSERLESS_TOKEN,
+    airtopApiKey:
+      AIRTOP_API_KEY,
   });
 
 async function buildStatus({
