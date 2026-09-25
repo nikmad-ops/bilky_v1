@@ -253,12 +253,40 @@ export function createProductionClient({
     await guardChallenge(stage);
   }
 
-  async function saveProfileAfterLogin() {
-    const context = page.context();
-    const cdp = await context.newCDPSession(page);
-    const result = await cdp.send("Browserless.saveProfile", { name: profileName });
+  async function refreshProfileAfterLogin() {
+    const storage = await page.context().storageState();
+
+    const state = {
+      cookies: storage.cookies,
+      origins: storage.origins.map((origin) => ({
+        origin: origin.origin,
+        localStorage: Object.fromEntries(
+          (origin.localStorage || []).map(({ name, value }) => [name, value])
+        ),
+      })),
+    };
+
+    const response = await fetch(
+      `${BROWSERLESS_ORIGIN}/profile/refresh?token=${encodeURIComponent(browserlessToken)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profileName,
+          state,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Browserless profile refresh failed: HTTP ${response.status} ${await response.text()}`
+      );
+    }
+
+    const result = await response.json();
     log(
-      `Browserless profile saved after login: cookies=${result?.cookieCount ?? "unknown"} origins=${result?.originCount ?? "unknown"}`
+      `Browserless profile refreshed after login: cookies=${result?.cookieCount ?? "unknown"} origins=${result?.originCount ?? "unknown"}`
     );
   }
 
@@ -286,7 +314,7 @@ export function createProductionClient({
       await guardChallenge("login");
 
       if (!page.url().includes("/auth/login")) {
-        await saveProfileAfterLogin();
+        await refreshProfileAfterLogin();
         return true;
       }
 
