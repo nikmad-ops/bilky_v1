@@ -62,7 +62,7 @@ jobs:
           REQUEST_CHAT_ID: ${{ inputs.chat_id }}
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
-          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run status
 
