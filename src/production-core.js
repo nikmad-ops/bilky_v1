@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { AirtopClient } from "@airtop/sdk";
 import fs from "node:fs";
 
 export const WORKSHIFT_URL =
@@ -65,31 +66,60 @@ export function factsFromHttp200(body) {
 export function createProductionClient({
   nif,
   password,
-  brightDataCdpUrl,
+  airtopApiKey,
   attempt,
   diagnosticsDir = "diagnostics",
 }) {
   if (!nif) throw new Error("Missing BILKY_NIF");
   if (!password) throw new Error("Missing BILKY_PASSWORD");
-  if (!brightDataCdpUrl) throw new Error("Missing BRIGHTDATA_CDP_URL");
+  if (!airtopApiKey) throw new Error("Missing AIRTOP_API_KEY");
   if (![1, 2, 3, 4, 5].includes(Number(attempt))) {
     throw new Error(`ATTEMPT must be 1..5. Got: ${attempt}`);
   }
 
   fs.mkdirSync(diagnosticsDir, { recursive: true });
 
+  const airtop = new AirtopClient({ apiKey: airtopApiKey });
+
+  let sessionId = null;
   let browser = null;
   let context = null;
   let page = null;
 
   async function connect() {
-    log(`Connecting to Bright Data Browser API. attempt=${attempt}/5`);
+    log(`Creating Airtop session. attempt=${attempt}/5 solveCaptcha=true proxy=ES sticky=true`);
 
-    browser = await chromium.connectOverCDP(brightDataCdpUrl, {
+    const session = await airtop.sessions.create({
+      configuration: {
+        solveCaptcha: true,
+        proxy: {
+          country: "ES",
+          sticky: true,
+        },
+        timeoutMinutes: 2,
+      },
+    });
+
+    sessionId = session.data.id;
+
+    if (!session.data.cdpWsUrl) {
+      throw new Error("Airtop session did not return cdpWsUrl");
+    }
+
+    log(`Airtop session ready: ${sessionId}`);
+
+    browser = await chromium.connectOverCDP(session.data.cdpWsUrl, {
+      headers: {
+        authorization: `Bearer ${airtopApiKey}`,
+      },
       timeout: 120000,
     });
 
-    context = browser.contexts()[0] || (await browser.newContext());
+    context = browser.contexts()[0];
+    if (!context) {
+      throw new Error("Airtop default browser context not found");
+    }
+
     page = context.pages()[0] || (await context.newPage());
 
     page.setDefaultTimeout(30000);
@@ -157,7 +187,7 @@ export function createProductionClient({
   }
 
   async function openWorkshift(date) {
-    log("Opening direct Workshift URL through Bright Data.");
+    log("Opening direct Workshift URL through Airtop.");
 
     await page.goto(WORKSHIFT_URL, {
       waitUntil: "domcontentloaded",
@@ -285,7 +315,7 @@ export function createProductionClient({
               : null,
           httpStatus: null,
           attempt: Number(attempt),
-          provider: "brightdata",
+          provider: "airtop",
         };
       }
 
@@ -300,7 +330,7 @@ export function createProductionClient({
         throw new Error(`${mode}: Clock in/out button is disabled`);
       }
 
-      log(`CLICK ${mode}: authorized production click via Bright Data.`);
+      log(`CLICK ${mode}: authorized production click via Airtop.`);
 
       const responsePromise = page.waitForResponse(
         (response) =>
@@ -326,7 +356,7 @@ export function createProductionClient({
           {
             date,
             action: mode,
-            provider: "brightdata",
+            provider: "airtop",
             httpStatus: 200,
             attempt: Number(attempt),
             committedAt: new Date().toISOString(),
@@ -373,7 +403,7 @@ export function createProductionClient({
         responseBodyError: bodyReadError,
         responseTimesFound: facts.all.length,
         attempt: Number(attempt),
-        provider: "brightdata",
+        provider: "airtop",
       };
     } finally {
       await close();
@@ -381,11 +411,21 @@ export function createProductionClient({
   }
 
   async function close() {
-    if (!browser) return;
-    await browser.close().catch(() => {});
+    if (browser) {
+      log("Closing Airtop browser connection.");
+      await browser.close().catch((error) => {
+        log(`Airtop browser close warning: ${String(error?.message || error).split("\n")[0].slice(0, 200)}`);
+      });
+    }
+
+    if (sessionId) {
+      log(`Airtop session cleanup bounded by timeoutMinutes=2: ${sessionId}`);
+    }
+
     browser = null;
     context = null;
     page = null;
+    sessionId = null;
   }
 
   return {
