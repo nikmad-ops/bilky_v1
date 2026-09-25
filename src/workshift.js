@@ -8,8 +8,7 @@ import {
 const {
   BILKY_NIF,
   BILKY_PASSWORD,
-  BROWSERLESS_TOKEN,
-  BROWSERLESS_PROFILE,
+  BRIGHTDATA_CDP_URL,
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -18,7 +17,7 @@ const {
 for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
-  BROWSERLESS_TOKEN,
+  BRIGHTDATA_CDP_URL,
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -44,8 +43,7 @@ const date = madridDate();
 const client = createProductionClient({
   nif: BILKY_NIF,
   password: BILKY_PASSWORD,
-  browserlessToken: BROWSERLESS_TOKEN,
-  profileName: BROWSERLESS_PROFILE || "bilky-nik-production",
+  brightDataCdpUrl: BRIGHTDATA_CDP_URL,
   attempt,
 });
 
