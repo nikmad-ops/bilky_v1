@@ -52,11 +52,18 @@ function shortError(error) {
     .slice(0, 300);
 }
 
-function factFromCell(cellHtml) {
-  const match = String(cellHtml || "").match(
+function factFromCell(value) {
+  const text = String(value || "");
+
+  const direct = text.match(
+    /^\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})$/
+  );
+  if (direct) return direct[1];
+
+  const embedded = text.match(
     /data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["']/i
   );
-  return match ? match[1] : null;
+  return embedded ? embedded[1] : null;
 }
 
 export function factsFromHttp200(body) {
@@ -159,6 +166,7 @@ export function createProductionClient({
         log("Cloudflare/CAPTCHA detected by Browserless.");
       });
       cdp.on("Browserless.captchaAutoSolved", (event) => {
+        if (event?.solved) captchaSeen = false;
         log(`Browserless solver event solved=${Boolean(event?.solved)}`);
       });
     } catch (error) {
@@ -302,7 +310,11 @@ export function createProductionClient({
       }
 
       captchaSeen = false;
-      await link.click();
+      try {
+        await link.click({ noWaitAfter: true });
+      } catch (error) {
+        if (!(await challengeDetected())) throw error;
+      }
       await guardChallenge("dashboard-workshift");
     }
 
