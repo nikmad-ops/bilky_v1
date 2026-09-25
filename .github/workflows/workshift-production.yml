@@ -51,14 +51,14 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 1610 ] || [ "${MADRID_TIME}" -gt 1700 ]; then
-                echo "Blocked: morning outside temporary Airtop test window 16:10-17:00 Europe/Madrid"
+              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0825 ]; then
+                echo "Blocked: morning outside 07:55-08:25 Europe/Madrid"
                 exit 1
               fi
               ;;
             evening)
-              if [ "${MADRID_TIME}" -lt 1705 ] || [ "${MADRID_TIME}" -gt 1735 ]; then
-                echo "Blocked: evening outside temporary 17:05-17:35 Europe/Madrid"
+              if [ "${MADRID_TIME}" -lt 2050 ] || [ "${MADRID_TIME}" -gt 2110 ]; then
+                echo "Blocked: evening outside TEMP FINAL TEST 20:50-21:10 Europe/Madrid"
                 exit 1
               fi
               ;;
@@ -138,12 +138,16 @@ jobs:
             fi
           fi
 
-          if [ -n "${FACT}" ]; then
+          if [ "${STATUS}" = "already_done" ]; then
+            if [ -n "${FACT}" ]; then
+              MESSAGE="✅ Bilky ${DATE}: ${LABEL} already recorded. Fact: ${FACT:0:5}"
+            else
+              MESSAGE="✅ Bilky ${DATE}: ${LABEL} already recorded. Fact unavailable"
+            fi
+          elif [ -n "${FACT}" ]; then
             MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Fact: ${FACT:0:5}"
-          elif [ "${STATUS}" = "clicked" ]; then
-            MESSAGE="✅ Bilky ${DATE}: ${LABEL} recorded (HTTP 200). Fact unavailable"
           else
-            MESSAGE="✅ Bilky ${DATE}: ${LABEL} already recorded. Fact unavailable"
+            MESSAGE="✅ Bilky ${DATE}: ${LABEL} recorded (HTTP 200). Fact unavailable"
           fi
 
           if [ -n "${DURATION}" ]; then
