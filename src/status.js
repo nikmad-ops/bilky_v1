@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import {
   TIMEZONE,
-  createBilkyCore,
+  createStatusCore,
   formatDuration,
   log,
   minutesFromTime,
-} from "./bilky-core.js";
+} from "./status-core.js";
 
 const {
   BILKY_NIF,
@@ -446,7 +446,7 @@ function classifyDay(
       nowMinutes <
         8 *
           60 +
-          15
+          25
     ) {
       return {
         line:
@@ -471,7 +471,7 @@ function classifyDay(
       nowMinutes <=
         16 *
           60 +
-          35
+          50
     ) {
       return {
         line:
@@ -521,7 +521,7 @@ function classifyDay(
 }
 
 const bilky =
-  createBilkyCore({
+  createStatusCore({
     nif:
       BILKY_NIF,
     password:
@@ -627,8 +627,7 @@ async function buildStatus({
 
 async function main() {
   const report =
-    await bilky.runWithRetries(
-      "Bilky status",
+    await bilky.run(
       buildStatus
     );
 
