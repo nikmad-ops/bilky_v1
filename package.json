@@ -9,7 +9,7 @@
     "airtop-smoke": "node src/airtop-smoke.js"
   },
   "dependencies": {
-    "@airtop/sdk": "^1.11.0",
+    "@airtop/sdk": "^0.1.47",
     "playwright-core": "^1.55.0"
   }
 }
