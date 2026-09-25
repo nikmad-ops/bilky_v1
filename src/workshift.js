@@ -8,7 +8,7 @@ import {
 const {
   BILKY_NIF,
   BILKY_PASSWORD,
-  BRIGHTDATA_CDP_URL,
+  AIRTOP_API_KEY,
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -17,7 +17,7 @@ const {
 for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
-  BRIGHTDATA_CDP_URL,
+  AIRTOP_API_KEY,
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -43,7 +43,7 @@ const date = madridDate();
 const client = createProductionClient({
   nif: BILKY_NIF,
   password: BILKY_PASSWORD,
-  brightDataCdpUrl: BRIGHTDATA_CDP_URL,
+  airtopApiKey: AIRTOP_API_KEY,
   attempt,
 });
 
@@ -80,7 +80,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
