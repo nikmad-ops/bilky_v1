@@ -85,8 +85,7 @@ jobs:
           EXECUTE: 'true'
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
-          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-          BROWSERLESS_PROFILE: bilky-nik-production
+          BRIGHTDATA_CDP_URL: ${{ secrets.BRIGHTDATA_CDP_URL }}
         shell: bash
         run: |
           set -euo pipefail
