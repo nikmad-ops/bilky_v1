@@ -126,17 +126,21 @@ async function main() {
     log("SAFE TEST COMPLETE. Login was NOT clicked. Workshift was NOT clicked.");
   } finally {
     if (browser) {
-      await browser.close().catch(() => {});
+      log("Closing Airtop browser connection");
+      await browser.close().catch((error) => {
+        console.error(
+          `Airtop browser close warning: ${String(error?.message || error)}`
+        );
+      });
       browser = null;
     }
 
+    // Do not call airtop.sessions.terminate() here.
+    // In the current SDK it can hang after Browser.close().
+    // The Airtop session itself is configured with timeoutMinutes: 2,
+    // so server-side cleanup remains bounded even if Browser.close() is not enough.
     if (sessionId) {
-      log("Terminating Airtop session");
-      await airtop.sessions.terminate(sessionId).catch((error) => {
-        console.error(
-          `Airtop session termination warning: ${String(error?.message || error)}`
-        );
-      });
+      log(`Airtop session cleanup bounded by timeoutMinutes=2: ${sessionId}`);
     }
   }
 }
