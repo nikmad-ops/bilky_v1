@@ -176,6 +176,34 @@ export function createProductionClient({
     throw new Error(`Bilky state unresolved after navigation; url=${page.url()}`);
   }
 
+  async function waitAfterLogin(date, timeoutMs = 45000) {
+    const container = page.locator(`#container_${date}`);
+    const workshiftLink = page
+      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
+      .first();
+
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      if (await container.isVisible().catch(() => false)) {
+        return "workshift";
+      }
+
+      if (await workshiftLink.count()) {
+        return "dashboard";
+      }
+
+      if (!page.url().includes("/auth/login")) {
+        await sleep(300);
+        continue;
+      }
+
+      await sleep(300);
+    }
+
+    throw new Error(`Bilky remained on login page after submit; url=${page.url()}`);
+  }
+
   async function loginIfNeeded(date) {
     const state = await waitForState(date);
 
@@ -185,28 +213,42 @@ export function createProductionClient({
 
     log("Bilky requested login.");
 
-    const visibleInputs = page.locator("input:visible");
-    if ((await visibleInputs.count()) < 2) {
+    const taxIdInput = page.locator("#taxid").first();
+    const passwordInput = page.locator("#password").first();
+
+    if (!(await taxIdInput.count()) || !(await passwordInput.count())) {
       throw new Error("Bilky login fields not found");
     }
 
-    await visibleInputs.nth(0).fill(nif);
-
-    const passwordInput = page.locator('input[type="password"]').first();
-    if (!(await passwordInput.count())) {
-      throw new Error("Bilky password field not found");
-    }
-
+    await taxIdInput.fill(nif);
     await passwordInput.fill(password);
+
+    const taxIdOk = (await taxIdInput.inputValue()).length === nif.length;
+    const passwordOk = (await passwordInput.inputValue()).length === password.length;
+
+    log(`Login fields filled: taxId=${taxIdOk} password=${passwordOk}`);
+
+    if (!taxIdOk || !passwordOk) {
+      throw new Error("Bilky login field verification failed");
+    }
 
     const submit = page.locator('button[type="submit"]').first();
     if (!(await submit.count())) {
       throw new Error("Bilky login button not found");
     }
 
-    await submit.click({ noWaitAfter: true });
+    log("Submitting Bilky login form via requestSubmit (viewport-independent).");
 
-    return waitForState(date);
+    await submit.evaluate((el) => {
+      const form = el.form;
+      if (form && typeof form.requestSubmit === "function") {
+        form.requestSubmit(el);
+      } else {
+        el.click();
+      }
+    });
+
+    return waitAfterLogin(date);
   }
 
   async function openWorkshift(date) {
@@ -229,8 +271,8 @@ export function createProductionClient({
         .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
         .first();
 
-      log("Dashboard detected; clicking Workshift link once.");
-      await link.click({ noWaitAfter: true });
+      log("Dashboard detected; opening Workshift through visible navigation link.");
+      await link.evaluate((el) => el.click());
 
       state = await waitForState(date);
 
@@ -362,7 +404,21 @@ export function createProductionClient({
         { timeout: 20000 }
       );
 
-      await button.click();
+      await cell.scrollIntoViewIfNeeded().catch(() => {});
+      await button.scrollIntoViewIfNeeded().catch(() => {});
+      await sleep(300);
+
+      try {
+        await button.click({ timeout: 10000 });
+      } catch (error) {
+        log(
+          `Clock button standard click failed; using DOM click fallback: ${String(error?.message || error)
+            .split("\n")[0]
+            .slice(0, 180)}`
+        );
+        await button.evaluate((el) => el.click());
+      }
+
       const response = await responsePromise;
 
       log(`clock-hour HTTP ${response.status()}`);
