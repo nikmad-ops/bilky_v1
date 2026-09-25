@@ -1,0 +1,25 @@
+name: TEMP Bright Data Readonly Smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/temp-brightdata-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Bright Data readonly smoke
+        env:
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          BRIGHTDATA_CDP_URL: ${{ secrets.BRIGHTDATA_CDP_URL }}
+        run: node src/brightdata-smoke.js
