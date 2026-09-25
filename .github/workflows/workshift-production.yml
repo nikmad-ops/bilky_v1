@@ -1,5 +1,5 @@
 name: Bilky Production
-run-name: Bilky ${{ inputs.action }} ${{ inputs.request_id }}
+run-name: Bilky ${{ inputs.action }} attempt ${{ inputs.attempt }} ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -11,96 +11,107 @@ on:
         options:
           - morning
           - evening
+      attempt:
+        description: 'attempt number 1..5'
+        required: true
+        type: number
+      request_id:
+        description: 'scheduler request id'
+        required: true
+        type: string
       execute:
-        description: 'Allow Bilky click operations'
+        description: 'allow Bilky click operations'
         required: true
         default: false
         type: boolean
-      request_id:
-        description: 'Scheduler request id'
-        required: true
-        type: string
 
 jobs:
   workshift:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Safety gate
         id: safety
         env:
           ACTION: ${{ inputs.action }}
+          ATTEMPT: ${{ inputs.attempt }}
           EXECUTE: ${{ inputs.execute }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ "${EXECUTE}" != "true" ]; then
-            echo "allowed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          [ "${EXECUTE}" = "true" ] || { echo "Blocked: execute=false"; exit 1; }
+          [[ "${ATTEMPT}" =~ ^[1-5]$ ]] || { echo "Blocked: invalid attempt ${ATTEMPT}"; exit 1; }
 
           MADRID_TIME=$(TZ=Europe/Madrid date +%H%M)
           MADRID_DOW=$(TZ=Europe/Madrid date +%u)
 
-          if [ "${MADRID_DOW}" -gt 5 ]; then
-            echo "Blocked: weekend."
-            exit 1
-          fi
+          [ "${MADRID_DOW}" -le 5 ] || { echo "Blocked: weekend"; exit 1; }
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0835 ]; then
-                echo "Blocked: morning execution outside scheduler grace 07:55-08:35 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0825 ]; then
+                echo "Blocked: morning outside 07:55-08:25 Europe/Madrid"
                 exit 1
               fi
               ;;
             evening)
-              if [ "${MADRID_TIME}" -lt 1615 ] || [ "${MADRID_TIME}" -gt 1655 ]; then
-                echo "Blocked: evening execution outside scheduler grace 16:15-16:55 Europe/Madrid."
+              if [ "${MADRID_TIME}" -lt 1620 ] || [ "${MADRID_TIME}" -gt 1650 ]; then
+                echo "Blocked: evening outside 16:20-16:50 Europe/Madrid"
                 exit 1
               fi
               ;;
             *)
-              echo "Blocked: invalid action ${ACTION}."
+              echo "Blocked: invalid action ${ACTION}"
               exit 1
               ;;
           esac
 
-          echo "allowed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
 
-      - name: Checkout repository
-        if: steps.safety.outputs.allowed == 'true'
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        if: steps.safety.outputs.allowed == 'true'
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Install dependencies
-        if: steps.safety.outputs.allowed == 'true'
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: Run Bilky workshift
         id: bilky
-        if: steps.safety.outputs.allowed == 'true'
         env:
           ACTION: ${{ inputs.action }}
+          ATTEMPT: ${{ inputs.attempt }}
           EXECUTE: 'true'
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          BROWSERLESS_PROFILE: bilky-nik-production
         shell: bash
         run: |
           set -euo pipefail
-          rm -f run-result.json run-error.txt run-committed.json
+
           npm run workshift
 
+          test -s run-result.json
+
+          SUCCESS=$(jq -r '.success // false' run-result.json)
+          STATUS=$(jq -r '.status // empty' run-result.json)
+
+          [ "${SUCCESS}" = "true" ] || { echo "run-result is not successful"; exit 1; }
+          case "${STATUS}" in
+            clicked|already_done) ;;
+            *) echo "Unexpected run-result status: ${STATUS}"; exit 1 ;;
+          esac
+
+          if [ "${STATUS}" = "clicked" ]; then
+            HTTP_STATUS=$(jq -r '.httpStatus // empty' run-result.json)
+            [ "${HTTP_STATUS}" = "200" ] || { echo "Clicked without HTTP 200 proof"; exit 1; }
+            test -s run-committed.json
+          fi
+
       - name: Telegram success
-        if: success() && steps.safety.outputs.allowed == 'true'
+        if: success()
         env:
           ACTION: ${{ inputs.action }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -110,39 +121,43 @@ jobs:
           set -euo pipefail
 
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
-          FACT=$(jq -r '.fact // empty' run-result.json 2>/dev/null || true)
-          DURATION=$(jq -r '.duration // empty' run-result.json 2>/dev/null || true)
-          FACT_PARSE_ERROR=$(jq -r '.factParseError // false' run-result.json 2>/dev/null || true)
+          STATUS=$(jq -r '.status' run-result.json)
+          FACT=$(jq -r '.fact // empty' run-result.json)
+          DURATION=$(jq -r '.duration // empty' run-result.json)
+          HTTP_STATUS=$(jq -r '.httpStatus // empty' run-result.json)
 
           if [ "${ACTION}" = "morning" ]; then
-            if [ "${FACT_PARSE_ERROR}" = "true" ] || [ -z "${FACT}" ]; then
-              MESSAGE="✅ Bilky ${DATE}: Morning recorded (HTTP 200). Fact unavailable"
-            else
-              MESSAGE="✅ Bilky ${DATE}: Morning. Fact: ${FACT:0:5}"
-            fi
+            LABEL="Morning"
           else
-            if [ "${FACT_PARSE_ERROR}" = "true" ] || [ -z "${FACT}" ]; then
-              MESSAGE="✅ Bilky ${DATE}: Evening recorded (HTTP 200). Fact unavailable"
-            else
-              MESSAGE="✅ Bilky ${DATE}: Evening. Fact: ${FACT:0:5}"
-            fi
+            LABEL="Evening"
+          fi
 
-            if [ -n "${DURATION}" ]; then
-              MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
+          if [ "${STATUS}" = "clicked" ]; then
+            if [ "${HTTP_STATUS}" != "200" ]; then
+              echo "Refusing Telegram success without HTTP 200"
+              exit 1
             fi
           fi
 
-          curl --fail --silent --show-error \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+          if [ -n "${FACT}" ]; then
+            MESSAGE="✅ Bilky ${DATE}: ${LABEL}. Fact: ${FACT:0:5}"
+          elif [ "${STATUS}" = "clicked" ]; then
+            MESSAGE="✅ Bilky ${DATE}: ${LABEL} recorded (HTTP 200). Fact unavailable"
+          else
+            MESSAGE="✅ Bilky ${DATE}: ${LABEL} already recorded. Fact unavailable"
+          fi
 
-      - name: Upload Bilky diagnostics
-        if: always() && steps.safety.outputs.allowed == 'true'
+          if [ -n "${DURATION}" ]; then
+            MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
+          fi
+
+          curl --fail --silent --show-error             --request POST             --header 'Content-Type: application/json'             --data "$(jq -nc --arg chat_id "${TELEGRAM_CHAT_ID}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')"             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+
+      - name: Upload diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bilky-workshift-diagnostics-${{ github.run_id }}
+          name: bilky-workshift-${{ github.run_id }}
           path: |
             diagnostics/
             run-result.json
