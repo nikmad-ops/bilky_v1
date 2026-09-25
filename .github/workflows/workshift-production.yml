@@ -25,6 +25,10 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: bilky-production-${{ inputs.action }}
+  cancel-in-progress: false
+
 jobs:
   workshift:
     runs-on: ubuntu-latest
