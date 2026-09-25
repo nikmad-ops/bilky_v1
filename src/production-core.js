@@ -307,7 +307,7 @@ export function createProductionClient({
     if (!(await submit.count())) throw new Error("Bilky login button not found");
 
     captchaSeen = false;
-    await submit.click();
+    await submit.click({ noWaitAfter: true });
 
     const deadline = Date.now() + (solverEnabled ? 60000 : 20000);
     while (Date.now() < deadline) {
@@ -456,14 +456,6 @@ export function createProductionClient({
       throw new Error(`Bilky clock-hour returned HTTP ${response.status()}`);
     }
 
-    const body = await response.text();
-
-    fs.writeFileSync(
-      `${diagnosticsDir}/clock-${mode}-http-200-body.html`,
-      body,
-      "utf8"
-    );
-
     fs.writeFileSync(
       "run-committed.json",
       JSON.stringify(
@@ -480,6 +472,21 @@ export function createProductionClient({
       "utf8"
     );
 
+    let body = "";
+    let bodyReadError = null;
+
+    try {
+      body = await response.text();
+      fs.writeFileSync(
+        `${diagnosticsDir}/clock-${mode}-http-200-body.html`,
+        body,
+        "utf8"
+      );
+    } catch (error) {
+      bodyReadError = shortError(error);
+      log(`${mode}: HTTP 200 committed but response body could not be saved: ${bodyReadError}`);
+    }
+
     const facts = factsFromHttp200(body);
     const fact = mode === "morning" ? facts.morning : facts.evening;
 
@@ -493,6 +500,7 @@ export function createProductionClient({
       duration: mode === "evening" ? dayDuration(facts.morning, facts.evening) : null,
       httpStatus: 200,
       factParseError: !fact,
+      responseBodyError: bodyReadError,
       responseTimesFound: facts.all.length,
       attempt: Number(attempt),
       solverUsed: solverEnabled,
