@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "workshift": "node src/workshift.js",
-    "status": "node src/status.js",
-    "airtop-smoke": "node src/airtop-smoke.js"
+    "status": "node src/status.js"
   },
   "dependencies": {
     "@airtop/sdk": "^0.1.47",
