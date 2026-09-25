@@ -326,50 +326,62 @@ export function createProductionClient({
     log("Opening direct Workshift URL first, matching restart UX.");
     await gotoAndGuard(WORKSHIFT_URL, "direct-workshift");
 
-    const loggedInNow = await loginOnlyIfBilkyAsks();
-
-    if (loggedInNow) {
-      const container = page.locator(`#container_${madridDate()}`);
-      const link = page
-        .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
-        .first();
-
-      const dashboardDeadline = Date.now() + 10000;
-
-      while (Date.now() < dashboardDeadline) {
-        await guardChallenge("post-login");
-
-        if (await container.isVisible().catch(() => false)) {
-          return;
-        }
-
-        if (await link.count()) {
-          captchaSeen = false;
-          try {
-            await link.click({ noWaitAfter: true });
-          } catch (error) {
-            if (!(await challengeDetected())) throw error;
-          }
-          await guardChallenge("dashboard-workshift");
-          break;
-        }
-
-        await sleep(250);
-      }
-
-      if (
-        !(await container.isVisible().catch(() => false)) &&
-        !(await link.count())
-      ) {
-        throw new Error("Workshift link did not appear on Bilky dashboard after login");
-      }
-    }
-
     const container = page.locator(`#container_${madridDate()}`);
-    const deadline = Date.now() + (solverEnabled ? 45000 : 15000);
+    const link = page
+      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
+      .first();
 
-    while (Date.now() < deadline) {
-      await guardChallenge("workshift-ready");
+    const settleDeadline = Date.now() + (solverEnabled ? 30000 : 8000);
+
+    while (Date.now() < settleDeadline) {
+      await guardChallenge("post-direct-workshift");
+
+      if (await container.isVisible().catch(() => false)) {
+        log("Workshift ready directly from saved profile.");
+        return;
+      }
+
+      if (page.url().includes("/auth/login")) {
+        const loggedInNow = await loginOnlyIfBilkyAsks();
+
+        if (loggedInNow) {
+          const dashboardDeadline = Date.now() + 10000;
+
+          while (Date.now() < dashboardDeadline) {
+            await guardChallenge("post-login");
+
+            if (await container.isVisible().catch(() => false)) {
+              log("Workshift ready after login.");
+              return;
+            }
+
+            if (await link.count()) {
+              captchaSeen = false;
+              try {
+                await link.click({ noWaitAfter: true });
+              } catch (error) {
+                if (!(await challengeDetected())) throw error;
+              }
+
+              await guardChallenge("dashboard-workshift");
+              break;
+            }
+
+            await sleep(250);
+          }
+        }
+      }
+
+      if (await link.count()) {
+        captchaSeen = false;
+        try {
+          await link.click({ noWaitAfter: true });
+        } catch (error) {
+          if (!(await challengeDetected())) throw error;
+        }
+
+        await guardChallenge("dashboard-workshift");
+      }
 
       if (await container.isVisible().catch(() => false)) {
         log("Workshift ready.");
@@ -379,7 +391,23 @@ export function createProductionClient({
       await sleep(300);
     }
 
-    throw new Error("Bilky Workshift did not become ready");
+    const finalDeadline = Date.now() + (solverEnabled ? 20000 : 7000);
+    while (Date.now() < finalDeadline) {
+      await guardChallenge("workshift-ready");
+
+      if (await container.isVisible().catch(() => false)) {
+        log("Workshift ready.");
+        return;
+      }
+
+      if (page.url().includes("/auth/login")) {
+        throw new Error("Bilky returned to login after Workshift navigation");
+      }
+
+      await sleep(300);
+    }
+
+    throw new Error(`Bilky Workshift did not become ready; final URL=${page.url()}`);
   }
 
   async function targetCell(mode, date) {
