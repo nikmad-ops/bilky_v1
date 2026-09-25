@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "workshift": "node src/workshift.js",
-    "status": "node src/status.js"
+    "status": "node src/status.js",
+    "airtop-smoke": "node src/airtop-smoke.js"
   },
   "dependencies": {
+    "@airtop/sdk": "^1.11.0",
     "playwright-core": "^1.55.0"
   }
 }
