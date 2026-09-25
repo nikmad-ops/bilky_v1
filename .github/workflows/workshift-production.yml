@@ -51,8 +51,8 @@ jobs:
 
           case "${ACTION}" in
             morning)
-              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0825 ]; then
-                echo "Blocked: morning outside 07:55-08:25 Europe/Madrid"
+              if [ "${MADRID_TIME}" -lt 1045 ] || [ "${MADRID_TIME}" -gt 1120 ]; then
+                echo "Blocked: morning outside temporary test window 10:45-11:20 Europe/Madrid"
                 exit 1
               fi
               ;;
