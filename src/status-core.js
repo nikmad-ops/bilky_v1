@@ -189,7 +189,8 @@ export function createStatusCore({ nif, password, browserlessToken }) {
         const page = context.pages()[0] || (await context.newPage());
 
         await openWorkshift(page, solverEnabled);
-        return await operation({ page });
+        const setStage = (stage) => log(`STATUS_STAGE=${stage}`);
+        return await operation({ page, setStage });
       } catch (error) {
         lastError = error;
       } finally {
