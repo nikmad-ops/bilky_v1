@@ -85,6 +85,7 @@ export function createProductionClient({
   let browser = null;
   let context = null;
   let page = null;
+  const captchaEvents = [];
 
   async function connect() {
     log(`Creating Airtop session. attempt=${attempt}/5 solveCaptcha=true proxy=ES sticky=true`);
@@ -107,6 +108,28 @@ export function createProductionClient({
     }
 
     log(`Airtop session ready: ${sessionId}`);
+
+    try {
+      await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
+        captchaEvents.push(event);
+        const status = event?.status || "unknown";
+        const type = event?.type || "unknown";
+        const duration = event?.duration ?? "n/a";
+        log(`CAPTCHA event: status=${status} type=${type} durationMs=${duration}`);
+        fs.writeFileSync(
+          `${diagnosticsDir}/captcha-events.json`,
+          JSON.stringify(captchaEvents, null, 2),
+          "utf8"
+        );
+      });
+      log("Airtop CAPTCHA event logging enabled.");
+    } catch (error) {
+      log(
+        `Airtop CAPTCHA event logging unavailable: ${String(error?.message || error)
+          .split("\n")[0]
+          .slice(0, 200)}`
+      );
+    }
 
     browser = await chromium.connectOverCDP(session.data.cdpWsUrl, {
       headers: {
@@ -420,6 +443,14 @@ export function createProductionClient({
 
     if (sessionId) {
       log(`Airtop session cleanup bounded by timeoutMinutes=2: ${sessionId}`);
+    }
+
+    if (captchaEvents.length) {
+      fs.writeFileSync(
+        `${diagnosticsDir}/captcha-events.json`,
+        JSON.stringify(captchaEvents, null, 2),
+        "utf8"
+      );
     }
 
     browser = null;
