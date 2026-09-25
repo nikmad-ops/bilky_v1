@@ -1,8 +1,9 @@
+import fs from "node:fs";
 import { chromium } from "playwright-core";
+import { AirtopClient } from "@airtop/sdk";
 
 export const TIMEZONE = "Europe/Madrid";
 
-const LOGIN_URL = "https://panel.bilky.es/auth/login";
 const WORKSHIFT_URL =
   "https://panel.bilky.es/employee/hour-registration/hour-registration/show/ekzv7lndr9eqy5da";
 
@@ -31,78 +32,57 @@ function factTime(value) {
   return match ? match[1] : null;
 }
 
-export function createStatusCore({ nif, password, browserlessToken }) {
+export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir = "diagnostics" }) {
   if (!nif) throw new Error("Missing BILKY_NIF");
   if (!password) throw new Error("Missing BILKY_PASSWORD");
-  if (!browserlessToken) throw new Error("Missing BROWSERLESS_TOKEN");
+  if (!airtopApiKey) throw new Error("Missing AIRTOP_API_KEY");
 
-  async function challengeDetected(page) {
-    let title = "";
-    try {
-      title = await Promise.race([
-        page.title(),
-        sleep(750).then(() => ""),
-      ]);
-    } catch {}
+  fs.mkdirSync(diagnosticsDir, { recursive: true });
 
-    const frames = page.frames().map((frame) => frame.url()).join(" ");
-    const signal = `${page.url()} ${title} ${frames}`.toLowerCase();
+  const airtop = new AirtopClient({ apiKey: airtopApiKey });
 
-    return (
-      signal.includes("just a moment") ||
-      signal.includes("cdn-cgi/challenge-platform") ||
-      signal.includes("challenges.cloudflare.com")
-    );
-  }
+  async function openWorkshift(page) {
+    log("STATUS_STAGE=open-workshift");
 
-  async function waitSolver(page, timeoutMs = 45000) {
-    const deadline = Date.now() + timeoutMs;
-    let clearSince = 0;
-
-    while (Date.now() < deadline) {
-      if (await challengeDetected(page)) {
-        clearSince = 0;
-      } else {
-        if (!clearSince) clearSince = Date.now();
-        if (Date.now() - clearSince >= 1200) return;
-      }
-
-      await sleep(400);
-    }
-
-    throw new Error("Cloudflare solver timeout");
-  }
-
-  async function openWorkshift(page, solverEnabled) {
-    try {
-      await page.goto(WORKSHIFT_URL, {
-        waitUntil: "domcontentloaded",
-        timeout: solverEnabled ? 45000 : 20000,
-      });
-    } catch (error) {
-      if (!(await challengeDetected(page))) throw error;
-    }
-
-    if (await challengeDetected(page)) {
-      if (!solverEnabled) throw new Error("Cloudflare blocked status read");
-      await waitSolver(page);
-    }
+    await page.goto(WORKSHIFT_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 120000,
+    });
 
     if (page.url().includes("/auth/login")) {
-      const inputs = page.locator("input:visible");
-      if ((await inputs.count()) < 2) throw new Error("Bilky login fields not found");
+      log("STATUS_STAGE=login-form");
 
-      await inputs.nth(0).fill(nif);
-      await page.locator('input[type="password"]').first().fill(password);
-      await page.locator('button[type="submit"]').first().click({ noWaitAfter: true });
+      const taxId = page.locator("#taxid").first();
+      const passwordInput = page.locator("#password").first();
 
-      if (await challengeDetected(page)) {
-        if (!solverEnabled) throw new Error("Cloudflare blocked status login");
-        await waitSolver(page);
+      await taxId.waitFor({ state: "visible", timeout: 120000 });
+      await passwordInput.waitFor({ state: "visible", timeout: 120000 });
+
+      await taxId.fill(nif);
+      await passwordInput.fill(password);
+
+      if ((await taxId.inputValue()).length !== nif.length) {
+        throw new Error("Bilky status TaxID fill verification failed");
       }
 
-      const deadline = Date.now() + 20000;
-      while (Date.now() < deadline && page.url().includes("/auth/login")) {
+      if ((await passwordInput.inputValue()).length !== password.length) {
+        throw new Error("Bilky status password fill verification failed");
+      }
+
+      const submit = page.locator('button[type="submit"]').first();
+      if (!(await submit.count())) throw new Error("Bilky status login button not found");
+
+      log("STATUS_STAGE=submit-login");
+
+      await submit.evaluate((el) => {
+        const form = el.form;
+        if (form && typeof form.requestSubmit === "function") form.requestSubmit(el);
+        else el.click();
+      });
+
+      const deadline = Date.now() + 60000;
+      while (Date.now() < deadline) {
+        if (!page.url().includes("/auth/login")) break;
         await sleep(300);
       }
 
@@ -114,17 +94,25 @@ export function createStatusCore({ nif, password, browserlessToken }) {
         .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
         .first();
 
-      if (!(await link.count())) {
-        throw new Error("Workshift link not found after status login");
-      }
-
-      await link.click({ noWaitAfter: true });
-
-      if (await challengeDetected(page)) {
-        if (!solverEnabled) throw new Error("Cloudflare blocked status Workshift");
-        await waitSolver(page);
+      if (await link.count()) {
+        log("STATUS_STAGE=dashboard-workshift");
+        await link.evaluate((el) => el.click());
       }
     }
+
+    const readyDeadline = Date.now() + 60000;
+    while (Date.now() < readyDeadline) {
+      if (page.url().includes("/employee/hour-registration/hour-registration/show/")) {
+        const anyDay = page.locator('[id^="container_"]').first();
+        if (await anyDay.count()) {
+          log("STATUS_STAGE=workshift-ready");
+          return;
+        }
+      }
+      await sleep(300);
+    }
+
+    throw new Error(`Bilky status Workshift not ready; url=${page.url()}`);
   }
 
   async function readDayState(page, date, { allowMissing = false } = {}) {
@@ -171,40 +159,66 @@ export function createStatusCore({ nif, password, browserlessToken }) {
   }
 
   async function run(operation) {
-    let lastError = null;
+    let sessionId = null;
+    let browser = null;
+    const captchaEvents = [];
 
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const solverEnabled = attempt === 2;
-      const params = new URLSearchParams({ token: browserlessToken });
-      if (solverEnabled) params.set("solveCaptchas", "true");
+    try {
+      log("Bilky status: creating Airtop session solveCaptcha=true proxy=ES sticky=true");
 
-      let browser = null;
+      const session = await airtop.sessions.create({
+        configuration: {
+          solveCaptcha: true,
+          proxy: { country: "ES", sticky: true },
+          timeoutMinutes: 2,
+        },
+      });
+
+      sessionId = session.data.id;
+      if (!session.data.cdpWsUrl) throw new Error("Airtop status session missing cdpWsUrl");
 
       try {
-        browser = await chromium.connectOverCDP(
-          `wss://production-ams.browserless.io/stealth?${params.toString()}`
-        );
-
-        const context = browser.contexts()[0];
-        const page = context.pages()[0] || (await context.newPage());
-
-        await openWorkshift(page, solverEnabled);
-        const setStage = (stage) => log(`STATUS_STAGE=${stage}`);
-        return await operation({ page, setStage });
+        await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
+          captchaEvents.push(event);
+          log(
+            `STATUS CAPTCHA: status=${event?.status || "unknown"} type=${event?.type || "unknown"} durationMs=${event?.duration ?? "n/a"}`
+          );
+        });
       } catch (error) {
-        lastError = error;
-      } finally {
-        if (browser) await browser.close().catch(() => {});
+        log(`Status CAPTCHA event logging unavailable: ${String(error?.message || error).split("\n")[0].slice(0, 180)}`);
       }
-    }
 
-    throw new Error(
-      `Bilky status failed: ${String(lastError?.message || lastError || "Unknown error")}`
-    );
+      browser = await chromium.connectOverCDP(session.data.cdpWsUrl, {
+        headers: { authorization: `Bearer ${airtopApiKey}` },
+        timeout: 120000,
+      });
+
+      const context = browser.contexts()[0];
+      if (!context) throw new Error("Airtop status browser context not found");
+
+      const page = context.pages()[0] || (await context.newPage());
+      page.setDefaultTimeout(30000);
+      page.setDefaultNavigationTimeout(120000);
+
+      await openWorkshift(page);
+
+      const setStage = (stage) => log(`STATUS_STAGE=${stage}`);
+      const result = await operation({ page, setStage });
+
+      if (captchaEvents.length) {
+        fs.writeFileSync(
+          `${diagnosticsDir}/status-captcha-events.json`,
+          JSON.stringify(captchaEvents, null, 2),
+          "utf8"
+        );
+      }
+
+      return result;
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+      if (sessionId) log(`Airtop status session cleanup bounded by timeoutMinutes=2: ${sessionId}`);
+    }
   }
 
-  return {
-    readDayState,
-    run,
-  };
+  return { readDayState, run };
 }
