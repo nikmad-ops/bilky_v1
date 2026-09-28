@@ -7,6 +7,9 @@ export const TIMEZONE = "Europe/Madrid";
 const WORKSHIFT_URL =
   "https://panel.bilky.es/employee/hour-registration/hour-registration/show/ekzv7lndr9eqy5da";
 
+const AIRTOP_STATUS_BUDGET_MS = 28000;
+const AIRTOP_PROFILE_NAME = "bilky-nik";
+
 export function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
@@ -170,12 +173,21 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
         configuration: {
           solveCaptcha: true,
           proxy: { country: "ES", sticky: true },
-          timeoutMinutes: 2,
+          timeoutMinutes: 1,
+          profileName: AIRTOP_PROFILE_NAME,
+          persistProfile: true,
         },
       });
 
       sessionId = session.data.id;
       if (!session.data.cdpWsUrl) throw new Error("Airtop status session missing cdpWsUrl");
+
+      const sessionReadyAt = Date.now();
+      const sessionDeadline = sessionReadyAt + AIRTOP_STATUS_BUDGET_MS;
+
+      log(
+        `Airtop status session ready: ${sessionId}; budget=${AIRTOP_STATUS_BUDGET_MS}ms profile=${AIRTOP_PROFILE_NAME}`
+      );
 
       try {
         await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
@@ -197,13 +209,27 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       if (!context) throw new Error("Airtop status browser context not found");
 
       const page = context.pages()[0] || (await context.newPage());
-      page.setDefaultTimeout(30000);
-      page.setDefaultNavigationTimeout(120000);
+      page.setDefaultTimeout(10000);
+      page.setDefaultNavigationTimeout(AIRTOP_STATUS_BUDGET_MS);
 
-      await openWorkshift(page);
-
-      const setStage = (stage) => log(`STATUS_STAGE=${stage}`);
-      const result = await operation({ page, setStage });
+      const result = await Promise.race([
+        (async () => {
+          await openWorkshift(page);
+          const setStage = (stage) => log(`STATUS_STAGE=${stage}`);
+          return operation({ page, setStage });
+        })(),
+        new Promise((_, reject) => {
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Airtop status session budget exceeded: ${AIRTOP_STATUS_BUDGET_MS}ms`
+                )
+              ),
+            Math.max(0, sessionDeadline - Date.now())
+          );
+        }),
+      ]);
 
       if (captchaEvents.length) {
         fs.writeFileSync(
@@ -215,8 +241,41 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
 
       return result;
     } finally {
+      const activeSessionId = sessionId;
+
+      if (activeSessionId) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+
+        try {
+          const response = await fetch(
+            `https://api.airtop.ai/api/v1/sessions/${encodeURIComponent(activeSessionId)}`,
+            {
+              method: "DELETE",
+              headers: {
+                Authorization: `Bearer ${airtopApiKey}`,
+              },
+              signal: controller.signal,
+            }
+          );
+
+          if (response.status === 204) {
+            log(`Airtop status session terminated explicitly: ${activeSessionId}`);
+          } else {
+            log(`Airtop status terminate HTTP ${response.status}`);
+          }
+        } catch (error) {
+          log(
+            `Airtop status terminate warning: ${String(error?.message || error)
+              .split("\n")[0]
+              .slice(0, 180)}`
+          );
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
       if (browser) await browser.close().catch(() => {});
-      if (sessionId) log(`Airtop status session cleanup bounded by timeoutMinutes=2: ${sessionId}`);
     }
   }
 
