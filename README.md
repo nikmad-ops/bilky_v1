@@ -6,13 +6,19 @@ Production provider: **Airtop**.
 
 - Cloudflare Worker cron: every 5 minutes.
 - Worker dispatches up to 5 independent GitHub Actions attempts inside the configured Europe/Madrid window.
+- Morning window: 07:55-08:25.
+- Evening window: 16:20-16:50.
 - One GitHub run = one attempt.
 - Stop immediately after a successful run.
 - Airtop session uses:
   - Spain proxy
   - sticky session
   - CAPTCHA solver enabled
-  - 2 minute server-side timeout
+  - hard application budget: 28 seconds after session is ready
+  - CAPTCHA solver budget: 25 seconds
+  - explicit REST session termination
+  - persistent profile: `bilky-nik`
+  - 1 minute server-side timeout only as a fallback
 
 ## Production flow
 
