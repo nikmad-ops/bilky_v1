@@ -61,8 +61,8 @@ jobs:
               fi
               ;;
             evening)
-              if [ "${MADRID_TIME}" -lt 1620 ] || [ "${MADRID_TIME}" -gt 1650 ]; then
-                echo "Blocked: evening outside 16:20-16:50 Europe/Madrid"
+              if [ "${MADRID_TIME}" -lt 1630 ] || [ "${MADRID_TIME}" -gt 1700 ]; then
+                echo "Blocked: evening outside 16:30-17:00 Europe/Madrid"
                 exit 1
               fi
               ;;
