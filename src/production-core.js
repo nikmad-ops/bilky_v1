@@ -6,6 +6,10 @@ export const WORKSHIFT_URL =
   "https://panel.bilky.es/employee/hour-registration/hour-registration/show/ekzv7lndr9eqy5da";
 export const TIMEZONE = "Europe/Madrid";
 
+const AIRTOP_SESSION_BUDGET_MS = 28000;
+const CAPTCHA_SOLVER_BUDGET_MS = 25000;
+const AIRTOP_PROFILE_NAME = "bilky-nik";
+
 export function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
 }
@@ -86,6 +90,10 @@ export function createProductionClient({
   let context = null;
   let page = null;
   const captchaEvents = [];
+  let sessionReadyAt = 0;
+  let sessionDeadline = 0;
+  let captchaDetectedAt = 0;
+  let captchaSolvedAt = 0;
 
   async function connect() {
     log(`Creating Airtop session. attempt=${attempt}/5 solveCaptcha=true proxy=ES sticky=true`);
@@ -97,7 +105,9 @@ export function createProductionClient({
           country: "ES",
           sticky: true,
         },
-        timeoutMinutes: 2,
+        timeoutMinutes: 1,
+        profileName: AIRTOP_PROFILE_NAME,
+        persistProfile: true,
       },
     });
 
@@ -107,7 +117,12 @@ export function createProductionClient({
       throw new Error("Airtop session did not return cdpWsUrl");
     }
 
-    log(`Airtop session ready: ${sessionId}`);
+    sessionReadyAt = Date.now();
+    sessionDeadline = sessionReadyAt + AIRTOP_SESSION_BUDGET_MS;
+
+    log(
+      `Airtop session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms profile=${AIRTOP_PROFILE_NAME}`
+    );
 
     try {
       await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
@@ -115,6 +130,19 @@ export function createProductionClient({
         const status = event?.status || "unknown";
         const type = event?.type || "unknown";
         const duration = event?.duration ?? "n/a";
+
+        if (status === "detected" || status === "processing") {
+          if (!captchaDetectedAt) captchaDetectedAt = Date.now();
+        }
+
+        if (status === "completed" || event?.solved === true) {
+          captchaSolvedAt = Date.now();
+        }
+
+        if (status === "failed") {
+          captchaDetectedAt = captchaDetectedAt || Date.now();
+        }
+
         log(`CAPTCHA event: status=${status} type=${type} durationMs=${duration}`);
         fs.writeFileSync(
           `${diagnosticsDir}/captcha-events.json`,
@@ -145,19 +173,65 @@ export function createProductionClient({
 
     page = context.pages()[0] || (await context.newPage());
 
-    page.setDefaultTimeout(30000);
-    page.setDefaultNavigationTimeout(120000);
+    page.setDefaultTimeout(10000);
+    page.setDefaultNavigationTimeout(AIRTOP_SESSION_BUDGET_MS);
   }
 
-  async function waitForState(date, timeoutMs = 120000) {
+  function remainingSessionMs() {
+    if (!sessionDeadline) return AIRTOP_SESSION_BUDGET_MS;
+    return Math.max(0, sessionDeadline - Date.now());
+  }
+
+  function assertSessionBudget(stage) {
+    const remaining = remainingSessionMs();
+
+    if (captchaDetectedAt && !captchaSolvedAt) {
+      const captchaAge = Date.now() - captchaDetectedAt;
+      if (captchaAge >= CAPTCHA_SOLVER_BUDGET_MS) {
+        throw new Error(
+          `CAPTCHA solver budget exceeded at ${stage}: ${captchaAge}ms >= ${CAPTCHA_SOLVER_BUDGET_MS}ms`
+        );
+      }
+    }
+
+    if (remaining <= 0) {
+      throw new Error(
+        `Airtop session budget exceeded at ${stage}: ${AIRTOP_SESSION_BUDGET_MS}ms`
+      );
+    }
+
+    return remaining;
+  }
+
+  async function withinSessionBudget(operation, stage = "operation") {
+    const remaining = assertSessionBudget(stage);
+
+    return Promise.race([
+      operation(),
+      new Promise((_, reject) => {
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Airtop session budget exceeded at ${stage}: ${AIRTOP_SESSION_BUDGET_MS}ms`
+              )
+            ),
+          remaining
+        );
+      }),
+    ]);
+  }
+
+  async function waitForState(date, timeoutMs = AIRTOP_SESSION_BUDGET_MS) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
       .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
       .first();
 
-    const deadline = Date.now() + timeoutMs;
+    const deadline = Math.min(Date.now() + timeoutMs, sessionDeadline || Infinity);
 
     while (Date.now() < deadline) {
+      assertSessionBudget("waitForState");
       if (await container.isVisible().catch(() => false)) {
         return "workshift";
       }
@@ -176,15 +250,16 @@ export function createProductionClient({
     throw new Error(`Bilky state unresolved after navigation; url=${page.url()}`);
   }
 
-  async function waitAfterLogin(date, timeoutMs = 45000) {
+  async function waitAfterLogin(date, timeoutMs = AIRTOP_SESSION_BUDGET_MS) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
       .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
       .first();
 
-    const deadline = Date.now() + timeoutMs;
+    const deadline = Math.min(Date.now() + timeoutMs, sessionDeadline || Infinity);
 
     while (Date.now() < deadline) {
+      assertSessionBudget("waitAfterLogin");
       if (await container.isVisible().catch(() => false)) {
         return "workshift";
       }
@@ -254,10 +329,14 @@ export function createProductionClient({
   async function openWorkshift(date) {
     log("Opening direct Workshift URL through Airtop.");
 
-    await page.goto(WORKSHIFT_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 120000,
-    });
+    await withinSessionBudget(
+      () =>
+        page.goto(WORKSHIFT_URL, {
+          waitUntil: "domcontentloaded",
+          timeout: Math.max(1000, remainingSessionMs()),
+        }),
+      "openWorkshift.goto"
+    );
 
     let state = await loginIfNeeded(date);
 
@@ -358,7 +437,8 @@ export function createProductionClient({
     await connect();
 
     try {
-      await openWorkshift(date);
+      return await withinSessionBudget(async () => {
+        await openWorkshift(date);
 
       const { cell, cells } = await targetCells(mode, date);
       const alreadyFact = await readFact(cell);
@@ -466,39 +546,71 @@ export function createProductionClient({
       const fact =
         mode === "morning" ? facts.morning : facts.evening;
 
-      return {
-        success: true,
-        status: "clicked",
-        action: mode,
-        fact,
-        morningFact: facts.morning,
-        eveningFact: facts.evening,
-        duration:
-          mode === "evening"
-            ? dayDuration(facts.morning, facts.evening)
-            : null,
-        httpStatus: 200,
-        factParseError: !fact,
-        responseBodyError: bodyReadError,
-        responseTimesFound: facts.all.length,
-        attempt: Number(attempt),
-        provider: "airtop",
-      };
+        return {
+          success: true,
+          status: "clicked",
+          action: mode,
+          fact,
+          morningFact: facts.morning,
+          eveningFact: facts.evening,
+          duration:
+            mode === "evening"
+              ? dayDuration(facts.morning, facts.evening)
+              : null,
+          httpStatus: 200,
+          factParseError: !fact,
+          responseBodyError: bodyReadError,
+          responseTimesFound: facts.all.length,
+          attempt: Number(attempt),
+          provider: "airtop",
+        };
+      }, "execute");
     } finally {
       await close();
     }
   }
 
+  async function terminateAirtopSession(id) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const response = await fetch(
+        `https://api.airtop.ai/api/v1/sessions/${encodeURIComponent(id)}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${airtopApiKey}`,
+          },
+          signal: controller.signal,
+        }
+      );
+
+      if (response.status !== 204) {
+        throw new Error(`Airtop terminate HTTP ${response.status}`);
+      }
+
+      log(`Airtop session terminated explicitly: ${id}`);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async function close() {
-    if (browser) {
-      log("Closing Airtop browser connection.");
-      await browser.close().catch((error) => {
-        log(`Airtop browser close warning: ${String(error?.message || error).split("\n")[0].slice(0, 200)}`);
+    const activeSessionId = sessionId;
+
+    if (activeSessionId) {
+      await terminateAirtopSession(activeSessionId).catch((error) => {
+        log(
+          `Airtop REST terminate warning: ${String(error?.message || error)
+            .split("\n")[0]
+            .slice(0, 200)}`
+        );
       });
     }
 
-    if (sessionId) {
-      log(`Airtop session cleanup bounded by timeoutMinutes=2: ${sessionId}`);
+    if (browser) {
+      await browser.close().catch(() => {});
     }
 
     if (captchaEvents.length) {
@@ -509,10 +621,18 @@ export function createProductionClient({
       );
     }
 
+    if (sessionReadyAt) {
+      log(`Airtop active session duration: ${Date.now() - sessionReadyAt}ms`);
+    }
+
     browser = null;
     context = null;
     page = null;
     sessionId = null;
+    sessionReadyAt = 0;
+    sessionDeadline = 0;
+    captchaDetectedAt = 0;
+    captchaSolvedAt = 0;
   }
 
   return {
