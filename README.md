@@ -7,7 +7,7 @@ Production provider: **Airtop**.
 - Cloudflare Worker cron: every 5 minutes.
 - Worker dispatches up to 5 independent GitHub Actions attempts inside the configured Europe/Madrid window.
 - Morning window: 07:55-08:25.
-- Evening window: 16:20-16:50.
+- Evening window: 16:30-17:00.
 - One GitHub run = one attempt.
 - Stop immediately after a successful run.
 - Airtop session uses:
