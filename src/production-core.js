@@ -372,17 +372,49 @@ export function createProductionClient({
     throw new Error(`Unable to reach Bilky Workshift; final state=${state}; url=${page.url()}`);
   }
 
-  async function targetCells(mode, date) {
-    const row = page
-      .locator(`#container_${date}`)
-      .locator("tr")
-      .filter({ hasText: /First shift|Primer turno/ })
-      .first();
+  async function findShiftRow(date) {
+    const container = page.locator(`#container_${date}`);
+    const rows = container.locator("tr");
+    const count = await rows.count();
+    const candidates = [];
 
-    if (!(await row.count())) {
-      throw new Error(`First shift row not found for ${date}`);
+    for (let i = 0; i < count; i += 1) {
+      const row = rows.nth(i);
+      const cells = row.locator("td.hr-container");
+      if ((await cells.count()) < 2) continue;
+
+      const plans = [];
+      for (let j = 0; j < 2; j += 1) {
+        const cell = cells.nth(j);
+        const input = cell.locator("input.clockpicker").first();
+        let value = "";
+        if (await input.count()) {
+          value = await input.inputValue().catch(() => "");
+        }
+        if (!value) {
+          const text = await cell.innerText().catch(() => "");
+          const match = String(text).match(/\b([01]\d|2[0-3]):[0-5]\d\b/);
+          value = match ? match[0] : "";
+        }
+        plans.push(value.slice(0, 5));
+      }
+
+      if (plans[0] === "08:00" && plans[1] === "16:00") {
+        return row;
+      }
+
+      candidates.push(row);
     }
 
+    if (candidates.length === 1) return candidates[0];
+
+    throw new Error(
+      `Shift row not found structurally for ${date}; candidates=${candidates.length}`
+    );
+  }
+
+  async function targetCells(mode, date) {
+    const row = await findShiftRow(date);
     const cells = row.locator("td.hr-container");
     const index = mode === "morning" ? 0 : 1;
 
