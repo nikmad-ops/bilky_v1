@@ -127,13 +127,45 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
 
     await container.waitFor({ state: "visible", timeout: 10000 });
 
-    const row = container
-      .locator("tr")
-      .filter({ hasText: /First shift|Primer turno/ })
-      .first();
+    const rows = container.locator("tr");
+    const rowCount = await rows.count();
+    let row = null;
+    const candidates = [];
 
-    if (!(await row.count())) {
-      throw new Error(`First shift row not found for ${date}`);
+    for (let i = 0; i < rowCount; i += 1) {
+      const candidate = rows.nth(i);
+      const candidateCells = candidate.locator("td.hr-container");
+      if ((await candidateCells.count()) < 2) continue;
+
+      const plans = [];
+      for (let j = 0; j < 2; j += 1) {
+        const cell = candidateCells.nth(j);
+        const input = cell.locator("input.clockpicker").first();
+        let value = "";
+        if (await input.count()) {
+          value = await input.inputValue().catch(() => "");
+        }
+        if (!value) {
+          const text = await cell.innerText().catch(() => "");
+          const match = String(text).match(/\b([01]\d|2[0-3]):[0-5]\d\b/);
+          value = match ? match[0] : "";
+        }
+        plans.push(value.slice(0, 5));
+      }
+
+      if (plans[0] === "08:00" && plans[1] === "16:00") {
+        row = candidate;
+        break;
+      }
+
+      candidates.push(candidate);
+    }
+
+    if (!row && candidates.length === 1) row = candidates[0];
+    if (!row) {
+      throw new Error(
+        `Shift row not found structurally for ${date}; candidates=${candidates.length}`
+      );
     }
 
     const cells = row.locator("td.hr-container");
@@ -147,11 +179,9 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       return factTime(await icon.getAttribute("data-original-title"));
     };
 
-    const signed =
-      (await container
-        .locator(".badge-success")
-        .filter({ hasText: /Signed|Firmado/ })
-        .count()) > 0;
+    const signedBadgeCount = await container.locator(".badge-success").count();
+    const signButtonCount = await container.locator("button#sign").count();
+    const signed = signedBadgeCount > 0 && signButtonCount === 0;
 
     return {
       exists: true,
