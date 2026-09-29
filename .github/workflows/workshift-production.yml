@@ -1,9 +1,17 @@
 name: Bilky Production
-run-name: Bilky ${{ inputs.action }} attempt ${{ inputs.attempt }} ${{ inputs.request_id }}
+run-name: Bilky ${{ inputs.mode }} ${{ inputs.action }} attempt ${{ inputs.attempt }} ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'scheduled or manual'
+        required: true
+        default: 'scheduled'
+        type: choice
+        options:
+          - scheduled
+          - manual
       action:
         description: 'morning or evening'
         required: true
@@ -38,6 +46,7 @@ jobs:
       - name: Safety gate
         id: safety
         env:
+          MODE: ${{ inputs.mode }}
           ACTION: ${{ inputs.action }}
           ATTEMPT: ${{ inputs.attempt }}
           EXECUTE: ${{ inputs.execute }}
@@ -47,6 +56,7 @@ jobs:
 
           [ "${EXECUTE}" = "true" ] || { echo "Blocked: execute=false"; exit 1; }
           [[ "${ATTEMPT}" =~ ^[1-5]$ ]] || { echo "Blocked: invalid attempt ${ATTEMPT}"; exit 1; }
+          [[ "${MODE}" =~ ^(scheduled|manual)$ ]] || { echo "Blocked: invalid mode ${MODE}"; exit 1; }
 
           MADRID_TIME=$(TZ=Europe/Madrid date +%H%M)
           MADRID_DOW=$(TZ=Europe/Madrid date +%u)
@@ -54,23 +64,29 @@ jobs:
           [ "${MADRID_DOW}" -le 5 ] || { echo "Blocked: weekend"; exit 1; }
 
           case "${ACTION}" in
-            morning)
-              if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0825 ]; then
-                echo "Blocked: morning outside 07:55-08:25 Europe/Madrid"
-                exit 1
-              fi
-              ;;
-            evening)
-              if [ "${MADRID_TIME}" -lt 1630 ] || [ "${MADRID_TIME}" -gt 1700 ]; then
-                echo "Blocked: evening outside 16:30-17:00 Europe/Madrid"
-                exit 1
-              fi
-              ;;
+            morning|evening) ;;
             *)
               echo "Blocked: invalid action ${ACTION}"
               exit 1
               ;;
           esac
+
+          if [ "${MODE}" = "scheduled" ]; then
+            case "${ACTION}" in
+              morning)
+                if [ "${MADRID_TIME}" -lt 0755 ] || [ "${MADRID_TIME}" -gt 0825 ]; then
+                  echo "Blocked: morning outside 07:55-08:25 Europe/Madrid"
+                  exit 1
+                fi
+                ;;
+              evening)
+                if [ "${MADRID_TIME}" -lt 1630 ] || [ "${MADRID_TIME}" -gt 1700 ]; then
+                  echo "Blocked: evening outside 16:30-17:00 Europe/Madrid"
+                  exit 1
+                fi
+                ;;
+            esac
+          fi
 
       - uses: actions/checkout@v4
 
