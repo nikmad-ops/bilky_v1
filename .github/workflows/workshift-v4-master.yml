@@ -1,0 +1,257 @@
+name: Bilky v4 Master
+
+on:
+  workflow_call:
+    inputs:
+      client_id:
+        required: true
+        type: string
+      client_label:
+        required: true
+        type: string
+      airtop_profile:
+        required: true
+        type: string
+      action:
+        required: true
+        type: string
+      mode:
+        required: true
+        type: string
+    secrets:
+      BILKY_NIF:
+        required: true
+      BILKY_PASSWORD:
+        required: true
+      AIRTOP_API_KEY:
+        required: true
+      TELEGRAM_BOT_TOKEN:
+        required: true
+      TELEGRAM_CHAT_ID:
+        required: true
+      ADMIN_TELEGRAM_BOT_TOKEN:
+        required: false
+      ADMIN_TELEGRAM_CHAT_ID:
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: 'Client id'
+        required: true
+        default: 'nik'
+        type: choice
+        options:
+          - nik
+      client_label:
+        description: 'Client label'
+        required: true
+        default: 'Nik'
+        type: string
+      airtop_profile:
+        description: 'Airtop profile'
+        required: true
+        default: 'bilky-nik'
+        type: string
+      action:
+        description: 'morning or evening'
+        required: true
+        type: choice
+        options:
+          - morning
+          - evening
+      mode:
+        description: 'scheduled or manual'
+        required: true
+        default: 'manual'
+        type: choice
+        options:
+          - manual
+          - scheduled
+
+concurrency:
+  group: bilky-v4-${{ inputs.client_id }}-${{ inputs.action }}
+  cancel-in-progress: false
+
+jobs:
+  workshift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Safety gate
+        shell: bash
+        env:
+          CLIENT_ID: ${{ inputs.client_id }}
+          ACTION: ${{ inputs.action }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+
+          [[ "${CLIENT_ID}" =~ ^(nik|alena|irakli)$ ]] || { echo "Invalid client_id"; exit 1; }
+          [[ "${ACTION}" =~ ^(morning|evening)$ ]] || { echo "Invalid action"; exit 1; }
+          [[ "${MODE}" =~ ^(manual|scheduled)$ ]] || { echo "Invalid mode"; exit 1; }
+
+          DOW=$(TZ=Europe/Madrid date +%u)
+          [ "${DOW}" -le 5 ] || { echo "Blocked: weekend"; exit 1; }
+
+          if [ "${MODE}" = "scheduled" ]; then
+            NOW=$(TZ=Europe/Madrid date +%H%M)
+            if [ "${ACTION}" = "morning" ]; then
+              [ "${NOW}" -ge 0755 ] && [ "${NOW}" -le 0825 ] || { echo "Outside morning window"; exit 1; }
+            else
+              [ "${NOW}" -ge 1630 ] && [ "${NOW}" -le 1700 ] || { echo "Outside evening window"; exit 1; }
+            fi
+          fi
+
+      - name: Checkout v4 master
+        uses: actions/checkout@v4
+        with:
+          repository: nikmad-ops/bilky_v1
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Execute one shift with internal retry ownership
+        id: bilky
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          AIRTOP_PROFILE_NAME: ${{ inputs.airtop_profile }}
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
+        run: |
+          set -uo pipefail
+
+          rm -f v4-result.json v4-attempts.ndjson
+          terminal_success=false
+          terminal_status=""
+          terminal_fact=""
+          terminal_http=""
+          terminal_attempt=""
+          last_error=""
+
+          for ATTEMPT in 1 2 3 4 5; do
+            echo "=== V4 attempt ${ATTEMPT}/5 ==="
+
+            set +e
+            ACTION="${ACTION}" ATTEMPT="${ATTEMPT}" EXECUTE="true" npm run workshift
+            rc=$?
+            set -e
+
+            if [ "${rc}" -eq 0 ] && [ -s run-result.json ]; then
+              success=$(jq -r '.success // false' run-result.json)
+              status=$(jq -r '.status // empty' run-result.json)
+              fact=$(jq -r '.fact // empty' run-result.json)
+              http=$(jq -r '.httpStatus // empty' run-result.json)
+
+              jq -nc                 --argjson attempt "${ATTEMPT}"                 --arg status "${status}"                 --arg fact "${fact}"                 --arg http "${http}"                 '{attempt:$attempt,outcome:"business_result",status:$status,fact:$fact,httpStatus:$http}'                 >> v4-attempts.ndjson
+
+              if [ "${success}" = "true" ] && { [ "${status}" = "clicked" ] || [ "${status}" = "already_done" ]; }; then
+                terminal_success=true
+                terminal_status="${status}"
+                terminal_fact="${fact}"
+                terminal_http="${http}"
+                terminal_attempt="${ATTEMPT}"
+                echo "V4 TERMINAL SUCCESS on attempt ${ATTEMPT}: ${status} fact=${fact}"
+                break
+              fi
+
+              last_error="unexpected business result: success=${success} status=${status}"
+            else
+              if [ -s run-error.txt ]; then
+                last_error=$(head -c 500 run-error.txt)
+              else
+                last_error="workshift process rc=${rc}"
+              fi
+
+              jq -nc                 --argjson attempt "${ATTEMPT}"                 --arg error "${last_error}"                 '{attempt:$attempt,outcome:"failure",error:$error}'                 >> v4-attempts.ndjson
+            fi
+
+            if [ "${ATTEMPT}" -lt 5 ]; then
+              echo "Real Bilky failure. Waiting 5 minutes before next attempt."
+              sleep 300
+            fi
+          done
+
+          if [ "${terminal_success}" = "true" ]; then
+            jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg status "${terminal_status}"               --arg fact "${terminal_fact}"               --arg http "${terminal_http}"               --argjson attempt "${terminal_attempt}"               --argjson success true               '{client:$client,action:$action,success:$success,status:$status,fact:$fact,httpStatus:$http,terminalAttempt:$attempt}'               > v4-result.json
+          else
+            jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg error "${last_error}"               --argjson success false               '{client:$client,action:$action,success:$success,status:"failed_after_5",error:$error}'               > v4-result.json
+          fi
+
+      - name: Send one terminal notification
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          CLIENT_LABEL: ${{ inputs.client_label }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
+          ADMIN_TELEGRAM_CHAT_ID: ${{ secrets.ADMIN_TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+
+          test -s v4-result.json || exit 0
+
+          DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
+          SUCCESS=$(jq -r '.success' v4-result.json)
+          FACT=$(jq -r '.fact // empty' v4-result.json)
+
+          if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
+
+          if [ "${SUCCESS}" = "true" ]; then
+            if [ -n "${FACT}" ]; then
+              MESSAGE="✅ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. Fact: ${FACT:0:5}"
+            else
+              MESSAGE="✅ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. SUCCESS"
+            fi
+          else
+            MESSAGE="❌ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. ERROR after 5/5 attempts"
+          fi
+
+          send_message() {
+            local bot_token="$1"
+            local chat_id="$2"
+
+            [ -n "${bot_token}" ] || return 0
+            [ -n "${chat_id}" ] || return 0
+
+            curl --fail --silent --show-error               --request POST               --header 'Content-Type: application/json'               --data "$(jq -nc --arg chat_id "${chat_id}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')"               "https://api.telegram.org/bot${bot_token}/sendMessage" >/dev/null
+          }
+
+          CLIENT_RC=0
+          ADMIN_RC=0
+
+          send_message "${TELEGRAM_BOT_TOKEN}" "${TELEGRAM_CHAT_ID}" || CLIENT_RC=$?
+          send_message "${ADMIN_TELEGRAM_BOT_TOKEN}" "${ADMIN_TELEGRAM_CHAT_ID}" || ADMIN_RC=$?
+
+          if [ "${CLIENT_RC}" -ne 0 ] || [ "${ADMIN_RC}" -ne 0 ]; then
+            echo "::warning::Telegram delivery failed: client_rc=${CLIENT_RC} admin_rc=${ADMIN_RC}; Bilky business result unchanged"
+          fi
+
+          exit 0
+
+      - name: Upload v4 diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-v4-${{ github.run_id }}
+          path: |
+            v4-result.json
+            v4-attempts.ndjson
+            diagnostics/
+            run-result.json
+            run-error.txt
+            run-committed.json
+          if-no-files-found: ignore
+          retention-days: 14
