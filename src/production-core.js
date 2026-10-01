@@ -277,6 +277,7 @@ export function createProductionClient({
   async function captureForensic(reason, date) {
     if (!page) return;
 
+    const startedAt = Date.now();
     const safe = async (operation, fallback = null) => {
       try {
         return await operation();
@@ -285,37 +286,42 @@ export function createProductionClient({
       }
     };
 
-    const capture = async () => {
-      const url = page.url();
-      const title = await safe(() => page.title(), "");
-      const readyState = await safe(
-        () => page.evaluate(() => document.readyState),
-        "unknown"
-      );
+    const url = page.url();
 
-      const fingerprint = await safe(
-        () =>
-          page.evaluate((targetDate) => {
-            const visible = (el) => {
-              if (!el) return false;
-              const style = window.getComputedStyle(el);
-              const rect = el.getBoundingClientRect();
-              return (
-                style.visibility !== "hidden" &&
-                style.display !== "none" &&
-                rect.width > 0 &&
-                rect.height > 0
-              );
-            };
+    const snapshot = await safe(
+      () =>
+        page.evaluate((targetDate) => {
+          const visible = (el) => {
+            if (!el) return false;
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return (
+              style.visibility !== "hidden" &&
+              style.display !== "none" &&
+              rect.width > 0 &&
+              rect.height > 0
+            );
+          };
 
-            const text = document.body?.innerText || "";
-            const html = document.documentElement?.outerHTML || "";
-            const cloudflare =
-              /cloudflare|cf-chl|challenge-platform|turnstile/i.test(
-                `${text}\n${html}`
-              );
+          const text = document.body?.innerText || "";
+          const html = document.documentElement?.outerHTML || "";
+          const clone = document.documentElement.cloneNode(true);
 
-            return {
+          for (const input of clone.querySelectorAll("input")) {
+            input.removeAttribute("value");
+          }
+
+          for (const el of clone.querySelectorAll(
+            '[name*="password" i],[id*="password" i],[autocomplete="current-password"]'
+          )) {
+            el.removeAttribute("value");
+            el.textContent = "";
+          }
+
+          return {
+            title: document.title,
+            readyState: document.readyState,
+            fingerprint: {
               url: location.href,
               title: document.title,
               readyState: document.readyState,
@@ -335,83 +341,65 @@ export function createProductionClient({
               clockButtons: document.querySelectorAll("a.clock").length,
               signButtons: document.querySelectorAll("button#sign").length,
               successBadges: document.querySelectorAll(".badge-success").length,
-              cloudflareMarkers: cloudflare,
+              cloudflareMarkers:
+                /cloudflare|cf-chl|challenge-platform|turnstile/i.test(
+                  `${text}\n${html}`
+                ),
               bodyTextSample: text.slice(0, 3000),
-            };
-          }, date),
-        null
-      );
+            },
+            sanitizedDom: "<!doctype html>\n" + clone.outerHTML,
+          };
+        }, date),
+      null
+    );
 
-      const sanitizedDom = await safe(
-        () =>
-          page.evaluate(() => {
-            const clone = document.documentElement.cloneNode(true);
-            for (const input of clone.querySelectorAll("input")) {
-              input.removeAttribute("value");
-              if (input.getAttribute("type") === "password") {
-                input.setAttribute("value", "[REDACTED]");
-              }
-            }
-            for (const el of clone.querySelectorAll(
-              '[name*="password" i],[id*="password" i],[autocomplete="current-password"]'
-            )) {
-              el.removeAttribute("value");
-              el.textContent = "";
-            }
-            return "<!doctype html>\n" + clone.outerHTML;
-          }),
-        ""
-      );
+    const payload = {
+      capturedAt: new Date().toISOString(),
+      reason,
+      date,
+      url,
+      title: snapshot?.title || "",
+      readyState: snapshot?.readyState || "unknown",
+      captchaEvents,
+      fingerprint: snapshot?.fingerprint || null,
+      recentNetwork: recentNetwork.slice(-40),
+    };
 
-      const payload = {
-        capturedAt: new Date().toISOString(),
-        reason,
-        date,
-        url,
-        title,
-        readyState,
-        captchaEvents,
-        fingerprint,
-        recentNetwork: recentNetwork.slice(-40),
-      };
+    fs.writeFileSync(
+      `${diagnosticsDir}/forensic-${reason}.json`,
+      JSON.stringify(payload, null, 2),
+      "utf8"
+    );
 
+    if (snapshot?.sanitizedDom) {
       fs.writeFileSync(
-        `${diagnosticsDir}/forensic-${reason}.json`,
-        JSON.stringify(payload, null, 2),
+        `${diagnosticsDir}/forensic-${reason}.html`,
+        snapshot.sanitizedDom,
         "utf8"
       );
+    }
 
-      if (sanitizedDom) {
-        fs.writeFileSync(
-          `${diagnosticsDir}/forensic-${reason}.html`,
-          sanitizedDom,
-          "utf8"
-        );
-      }
+    const remaining = Math.max(
+      0,
+      FORENSIC_CAPTURE_BUDGET_MS - (Date.now() - startedAt)
+    );
 
+    if (remaining >= 200) {
       await safe(
         () =>
           page.screenshot({
             path: `${diagnosticsDir}/forensic-${reason}.png`,
             fullPage: false,
+            timeout: Math.min(500, remaining),
           }),
         null
       );
-
-      log(
-        `Forensic snapshot captured: reason=${reason} url=${url} readyState=${readyState}`
-      );
-    };
-
-    await Promise.race([
-      capture(),
-      new Promise((resolve) =>
-        setTimeout(resolve, FORENSIC_CAPTURE_BUDGET_MS)
-      ),
-    ]).catch(() => {});
+    }
 
     log(
-      `Forensic capture finished/bounded: reason=${reason} budget=${FORENSIC_CAPTURE_BUDGET_MS}ms`
+      `Forensic snapshot finished: reason=${reason} durationMs=${
+        Date.now() - startedAt
+      }`
     );
   }
 
