@@ -134,6 +134,7 @@ jobs:
           terminal_status=""
           terminal_fact=""
           terminal_http=""
+          terminal_duration=""
           terminal_attempt=""
           last_error=""
 
@@ -150,6 +151,7 @@ jobs:
               status=$(jq -r '.status // empty' run-result.json)
               fact=$(jq -r '.fact // empty' run-result.json)
               http=$(jq -r '.httpStatus // empty' run-result.json)
+              duration=$(jq -r '.duration // empty' run-result.json)
 
               jq -nc                 --argjson attempt "${ATTEMPT}"                 --arg status "${status}"                 --arg fact "${fact}"                 --arg http "${http}"                 '{attempt:$attempt,outcome:"business_result",status:$status,fact:$fact,httpStatus:$http}'                 >> v4-attempts.ndjson
 
@@ -181,7 +183,7 @@ jobs:
           done
 
           if [ "${terminal_success}" = "true" ]; then
-            jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg status "${terminal_status}"               --arg fact "${terminal_fact}"               --arg http "${terminal_http}"               --argjson attempt "${terminal_attempt}"               --argjson success true               '{client:$client,action:$action,success:$success,status:$status,fact:$fact,httpStatus:$http,terminalAttempt:$attempt}'               > v4-result.json
+            jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg status "${terminal_status}"               --arg fact "${terminal_fact}"               --arg http "${terminal_http}"               --arg duration "${terminal_duration}"               --argjson attempt "${terminal_attempt}"               --argjson success true               '{client:$client,action:$action,success:$success,status:$status,fact:$fact,httpStatus:$http,duration:$duration,terminalAttempt:$attempt}'               > v4-result.json
           else
             jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg error "${last_error}"               --argjson success false               '{client:$client,action:$action,success:$success,status:"failed_after_5",error:$error}'               > v4-result.json
           fi
@@ -205,9 +207,11 @@ jobs:
           if [ -s v4-result.json ]; then
             SUCCESS=$(jq -r '.success' v4-result.json)
             FACT=$(jq -r '.fact // empty' v4-result.json)
+            DURATION=$(jq -r '.duration // empty' v4-result.json)
           else
             SUCCESS=false
             FACT=""
+            DURATION=""
           fi
 
           if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
@@ -220,6 +224,49 @@ jobs:
             fi
           else
             MESSAGE="❌ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. ERROR after 5/5 attempts"
+          fi
+
+          if [ -n "${DURATION}" ]; then
+            MESSAGE="${MESSAGE}"
+
+          send_message() {
+            local bot_token="$1"
+            local chat_id="$2"
+
+            [ -n "${bot_token}" ] || return 0
+            [ -n "${chat_id}" ] || return 0
+
+            curl --fail --silent --show-error               --request POST               --header 'Content-Type: application/json'               --data "$(jq -nc --arg chat_id "${chat_id}" --arg text "${MESSAGE}" '{chat_id:$chat_id,text:$text}')"               "https://api.telegram.org/bot${bot_token}/sendMessage" >/dev/null
+          }
+
+          CLIENT_RC=0
+          ADMIN_RC=0
+
+          send_message "${TELEGRAM_BOT_TOKEN}" "${TELEGRAM_CHAT_ID}" || CLIENT_RC=$?
+          send_message "${ADMIN_TELEGRAM_BOT_TOKEN}" "${ADMIN_TELEGRAM_CHAT_ID}" || ADMIN_RC=$?
+
+          if [ "${CLIENT_RC}" -ne 0 ] || [ "${ADMIN_RC}" -ne 0 ]; then
+            echo "::warning::Telegram delivery failed: client_rc=${CLIENT_RC} admin_rc=${ADMIN_RC}; Bilky business result unchanged"
+          fi
+
+          exit 0
+
+      - name: Upload v4 diagnostics
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-v4-${{ github.run_id }}
+          path: |
+            v4-result.json
+            v4-attempts.ndjson
+            diagnostics/
+            run-result.json
+            run-error.txt
+            run-committed.json
+          if-no-files-found: ignore
+          retention-days: 14
+\n'"Full working day: ${DURATION}"
           fi
 
           send_message() {
