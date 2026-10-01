@@ -246,10 +246,17 @@ export function createProductionClient({
     ]);
   }
 
+  function isDashboardUrl(url = page?.url() || "") {
+    return (
+      url.includes("/employee/dashboard/") ||
+      url.includes("/employee/control/panel")
+    );
+  }
+
   async function waitForState(date, timeoutMs = AIRTOP_SESSION_BUDGET_MS) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
-      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
+      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
       .first();
 
     const deadline = Math.min(Date.now() + timeoutMs, sessionDeadline || Infinity);
@@ -264,7 +271,7 @@ export function createProductionClient({
         return "login";
       }
 
-      if (await workshiftLink.count()) {
+      if (isDashboardUrl() || (await workshiftLink.count())) {
         return "dashboard";
       }
 
@@ -330,6 +337,9 @@ export function createProductionClient({
               visibleSubmitButtons: Array.from(
                 document.querySelectorAll('button[type="submit"]')
               ).filter(visible).length,
+              workshiftLinks: document.querySelectorAll(
+                'a[href*="/employee/hour-registration/hour-registration/show/"]'
+              ).length,
               visibleWorkshiftLinks: Array.from(
                 document.querySelectorAll(
                   'a[href*="/employee/hour-registration/hour-registration/show/"]'
@@ -341,10 +351,26 @@ export function createProductionClient({
               clockButtons: document.querySelectorAll("a.clock").length,
               signButtons: document.querySelectorAll("button#sign").length,
               successBadges: document.querySelectorAll(".badge-success").length,
-              cloudflareMarkers:
-                /cloudflare|cf-chl|challenge-platform|turnstile/i.test(
-                  `${text}\n${html}`
-                ),
+              challengeIndicators: {
+                challengeScript:
+                  /\/cdn-cgi\/challenge-platform\//i.test(html),
+                turnstile:
+                  Boolean(
+                    document.querySelector(
+                      '[name="cf-turnstile-response"], iframe[src*="turnstile"]'
+                    )
+                  ),
+                cfChallengeElement:
+                  Boolean(
+                    document.querySelector(
+                      '[id*="cf-chl"], [class*="cf-chl"], [data-cf-chl]'
+                    )
+                  ),
+                visibleChallengeText:
+                  /checking your browser|verify you are human|security verification|performing security verification/i.test(
+                    text
+                  ),
+              },
               bodyTextSample: text.slice(0, 3000),
             },
             sanitizedDom: "<!doctype html>\n" + clone.outerHTML,
@@ -409,7 +435,7 @@ export function createProductionClient({
   ) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
-      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
+      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
       .first();
 
     const deadline = Math.min(Date.now() + timeoutMs, sessionDeadline || Infinity);
@@ -421,7 +447,7 @@ export function createProductionClient({
         return "workshift";
       }
 
-      if (await workshiftLink.count()) {
+      if (isDashboardUrl() || (await workshiftLink.count())) {
         return "dashboard";
       }
 
@@ -503,11 +529,24 @@ export function createProductionClient({
 
     if (state === "dashboard") {
       const link = page
-        .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
+        .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
         .first();
 
-      log("Dashboard detected; opening Workshift through visible navigation link.");
-      await link.evaluate((el) => el.click());
+      const href =
+        (await link.getAttribute("href").catch(() => null)) || WORKSHIFT_URL;
+
+      log(
+        `Dashboard detected; opening Workshift by authenticated URL. href=${href}`
+      );
+
+      await withinSessionBudget(
+        () =>
+          page.goto(href, {
+            waitUntil: "domcontentloaded",
+            timeout: Math.max(1000, remainingSessionMs()),
+          }),
+        "openWorkshift.dashboardGoto"
+      );
 
       state = await waitForState(date);
 
@@ -516,7 +555,7 @@ export function createProductionClient({
       }
 
       if (state === "dashboard") {
-        throw new Error("Bilky remained on dashboard after Workshift click");
+        throw new Error("Bilky remained on dashboard after Workshift navigation");
       }
 
       if (state === "workshift") {
