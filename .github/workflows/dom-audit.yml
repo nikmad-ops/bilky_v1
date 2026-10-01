@@ -1,0 +1,30 @@
+name: Bilky DOM Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Read-only DOM audit
+        env:
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
+          AIRTOP_PROFILE_NAME: bilky-nik
+        run: node src/dom-audit.js
+      - name: Upload DOM audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-dom-audit-${{ github.run_id }}
+          path: dom-audit/
+          if-no-files-found: ignore
+          retention-days: 14
