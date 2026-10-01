@@ -1,6 +1,11 @@
 name: Bilky v4 Canary
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'v4-canary.trigger'
   workflow_dispatch:
     inputs:
       client_id:
@@ -32,7 +37,7 @@ on:
         type: boolean
 
 concurrency:
-  group: bilky-v4-${{ inputs.client_id }}-${{ inputs.action }}
+  group: bilky-v4-${{ github.event_name == 'push' && 'nik' || inputs.client_id }}-${{ github.event_name == 'push' && 'morning' || inputs.action }}
   cancel-in-progress: false
 
 jobs:
@@ -44,10 +49,10 @@ jobs:
       - name: Safety gate
         shell: bash
         env:
-          CLIENT_ID: ${{ inputs.client_id }}
-          ACTION: ${{ inputs.action }}
-          MODE: ${{ inputs.mode }}
-          EXECUTE: ${{ inputs.execute }}
+          CLIENT_ID: ${{ github.event_name == 'push' && 'nik' || inputs.client_id }}
+          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
+          MODE: ${{ github.event_name == 'push' && 'manual' || inputs.mode }}
+          EXECUTE: ${{ github.event_name == 'push' && 'true' || inputs.execute }}
         run: |
           set -euo pipefail
           [ "${CLIENT_ID}" = "nik" ] || { echo "Canary currently allows only nik"; exit 1; }
@@ -80,7 +85,7 @@ jobs:
         id: v4
         shell: bash
         env:
-          ACTION: ${{ inputs.action }}
+          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
@@ -149,7 +154,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          ACTION: ${{ inputs.action }}
+          ACTION: ${{ github.event_name == 'push' && 'morning' || inputs.action }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
