@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'v4-canary.trigger'
+      - '.github/workflows/workshift-v4-canary.yml'
   workflow_dispatch:
     inputs:
       client_id:
