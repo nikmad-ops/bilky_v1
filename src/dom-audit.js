@@ -54,7 +54,14 @@ async function snapshot(name) {
         submitVisible: Array.from(document.querySelectorAll('button[type="submit"]')).filter(visible).length,
       },
       dashboard: {
-        workshiftLinks: Array.from(document.querySelectorAll('a[href*="/employee/hour-registration/hour-registration/show/"]')).filter(visible).length,
+        workshiftLinks: document.querySelectorAll(
+          'a[href*="/employee/hour-registration/hour-registration/show/"]'
+        ).length,
+        visibleWorkshiftLinks: Array.from(
+          document.querySelectorAll(
+            'a[href*="/employee/hour-registration/hour-registration/show/"]'
+          )
+        ).filter(visible).length,
       },
       workshift: {
         containers: Array.from(document.querySelectorAll('[id^="container_"]')).map(x => x.id),
@@ -66,9 +73,23 @@ async function snapshot(name) {
         successBadges: document.querySelectorAll(".badge-success").length,
       },
       challenge: {
-        cloudflareMarkers: /cloudflare|cf-chl|challenge-platform|turnstile/i.test(
-          (document.body?.innerText || "") + "\n" + document.documentElement.outerHTML
+        challengeScript: /\/cdn-cgi\/challenge-platform\//i.test(
+          document.documentElement.outerHTML
         ),
+        turnstile: Boolean(
+          document.querySelector(
+            '[name="cf-turnstile-response"], iframe[src*="turnstile"]'
+          )
+        ),
+        cfChallengeElement: Boolean(
+          document.querySelector(
+            '[id*="cf-chl"], [class*="cf-chl"], [data-cf-chl]'
+          )
+        ),
+        visibleChallengeText:
+          /checking your browser|verify you are human|security verification|performing security verification/i.test(
+            document.body?.innerText || ""
+          ),
       },
     };
   });
@@ -103,7 +124,7 @@ async function main() {
   sessionId = session.data.id;
   browser = await chromium.connectOverCDP(session.data.cdpWsUrl, {
     headers: { authorization: `Bearer ${AIRTOP_API_KEY}` },
-    timeout: 120000,
+    timeout: 30000,
   });
 
   const context = browser.contexts()[0];
@@ -128,19 +149,36 @@ async function main() {
 
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
-      const hasDashboard = await page.locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible').count();
+      const hasDashboardLink = await page
+        .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
+        .count();
+      const hasDashboardUrl =
+        page.url().includes("/employee/dashboard/") ||
+        page.url().includes("/employee/control/panel");
       const hasWorkshift = await page.locator('[id^="container_"]').count();
-      if (hasDashboard || hasWorkshift) break;
+      if (hasDashboardUrl || hasDashboardLink || hasWorkshift) break;
       await new Promise(r => setTimeout(r, 250));
     }
   }
 
-  const hasDashboard = await page.locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible').count();
+  const dashboardLink = page
+    .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
+    .first();
+  const hasDashboard =
+    page.url().includes("/employee/dashboard/") ||
+    page.url().includes("/employee/control/panel") ||
+    (await dashboardLink.count()) > 0;
   const hasWorkshift = await page.locator('[id^="container_"]').count();
 
   if (hasDashboard) {
     await snapshot("03-dashboard");
-    await page.locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible').first().evaluate(el => el.click());
+    const href =
+      (await dashboardLink.getAttribute("href").catch(() => null)) ||
+      WORKSHIFT_URL;
+    await page.goto(href, {
+      waitUntil: "domcontentloaded",
+      timeout: 12000,
+    });
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
       if (await page.locator('[id^="container_"]').count()) break;
@@ -170,10 +208,23 @@ main()
   })
   .finally(async () => {
     if (sessionId) {
-      await fetch(`https://api.airtop.ai/api/v1/sessions/${encodeURIComponent(sessionId)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${AIRTOP_API_KEY}` },
-      }).catch(() => {});
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      await fetch(
+        `https://api.airtop.ai/api/v1/sessions/${encodeURIComponent(sessionId)}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${AIRTOP_API_KEY}` },
+          signal: controller.signal,
+        }
+      ).catch(() => {});
+      clearTimeout(timer);
     }
-    if (browser) await browser.close().catch(() => {});
+
+    if (browser) {
+      await Promise.race([
+        browser.close().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    }
   });
