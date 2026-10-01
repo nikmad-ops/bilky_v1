@@ -200,11 +200,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -s v4-result.json || exit 0
-
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
-          SUCCESS=$(jq -r '.success' v4-result.json)
-          FACT=$(jq -r '.fact // empty' v4-result.json)
+
+          if [ -s v4-result.json ]; then
+            SUCCESS=$(jq -r '.success' v4-result.json)
+            FACT=$(jq -r '.fact // empty' v4-result.json)
+          else
+            SUCCESS=false
+            FACT=""
+          fi
 
           if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
 
