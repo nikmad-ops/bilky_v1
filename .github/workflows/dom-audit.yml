@@ -1,6 +1,11 @@
 name: Bilky DOM Audit
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/dom-audit.yml'
   workflow_dispatch:
 
 jobs:
