@@ -134,7 +134,6 @@ jobs:
           terminal_status=""
           terminal_fact=""
           terminal_http=""
-          terminal_duration=""
           terminal_attempt=""
           last_error=""
 
@@ -151,7 +150,6 @@ jobs:
               status=$(jq -r '.status // empty' run-result.json)
               fact=$(jq -r '.fact // empty' run-result.json)
               http=$(jq -r '.httpStatus // empty' run-result.json)
-              duration=$(jq -r '.duration // empty' run-result.json)
 
               jq -nc                 --argjson attempt "${ATTEMPT}"                 --arg status "${status}"                 --arg fact "${fact}"                 --arg http "${http}"                 '{attempt:$attempt,outcome:"business_result",status:$status,fact:$fact,httpStatus:$http}'                 >> v4-attempts.ndjson
 
@@ -160,7 +158,6 @@ jobs:
                 terminal_status="${status}"
                 terminal_fact="${fact}"
                 terminal_http="${http}"
-                terminal_duration="${duration}"
                 terminal_attempt="${ATTEMPT}"
                 echo "V4 TERMINAL SUCCESS on attempt ${ATTEMPT}: ${status} fact=${fact}"
                 break
@@ -184,7 +181,7 @@ jobs:
           done
 
           if [ "${terminal_success}" = "true" ]; then
-            jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg status "${terminal_status}"               --arg fact "${terminal_fact}"               --arg http "${terminal_http}"               --arg duration "${terminal_duration}"               --argjson attempt "${terminal_attempt}"               --argjson success true               '{client:$client,action:$action,success:$success,status:$status,fact:$fact,httpStatus:$http,duration:$duration,terminalAttempt:$attempt}'               > v4-result.json
+            jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg status "${terminal_status}"               --arg fact "${terminal_fact}"               --arg http "${terminal_http}"               --argjson attempt "${terminal_attempt}"               --argjson success true               '{client:$client,action:$action,success:$success,status:$status,fact:$fact,httpStatus:$http,terminalAttempt:$attempt}'               > v4-result.json
           else
             jq -n               --arg client "${{ inputs.client_id }}"               --arg action "${ACTION}"               --arg error "${last_error}"               --argjson success false               '{client:$client,action:$action,success:$success,status:"failed_after_5",error:$error}'               > v4-result.json
           fi
@@ -208,11 +205,9 @@ jobs:
           if [ -s v4-result.json ]; then
             SUCCESS=$(jq -r '.success' v4-result.json)
             FACT=$(jq -r '.fact // empty' v4-result.json)
-            DURATION=$(jq -r '.duration // empty' v4-result.json)
           else
             SUCCESS=false
             FACT=""
-            DURATION=""
           fi
 
           if [ "${ACTION}" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
@@ -225,10 +220,6 @@ jobs:
             fi
           else
             MESSAGE="❌ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. ERROR after 5/5 attempts"
-          fi
-
-          if [ -n "${DURATION}" ]; then
-            MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
           fi
 
           send_message() {
