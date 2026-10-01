@@ -8,7 +8,7 @@ export const TIMEZONE = "Europe/Madrid";
 
 const AIRTOP_SESSION_BUDGET_MS = 28000;
 const CAPTCHA_SOLVER_BUDGET_MS = 25000;
-const AIRTOP_PROFILE_NAME = "bilky-nik";
+const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
 
 export function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
