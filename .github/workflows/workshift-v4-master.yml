@@ -175,8 +175,8 @@ jobs:
             fi
 
             if [ "${ATTEMPT}" -lt 5 ]; then
-              echo "Real Bilky failure. Waiting 5 minutes before next attempt."
-              sleep 300
+              echo "Real Bilky failure. Waiting 3 minutes before next attempt."
+              sleep 180
             fi
           done
 
