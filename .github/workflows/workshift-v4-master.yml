@@ -227,7 +227,8 @@ jobs:
           fi
 
           if [ -n "${DURATION}" ]; then
-            MESSAGE="${MESSAGE}"
+            MESSAGE="${MESSAGE}"$'\n'"Full working day: ${DURATION}"
+          fi
 
           send_message() {
             local bot_token="$1"
@@ -266,8 +267,6 @@ jobs:
             run-committed.json
           if-no-files-found: ignore
           retention-days: 14
-\n'"Full working day: ${DURATION}"
-          fi
 
           send_message() {
             local bot_token="$1"
