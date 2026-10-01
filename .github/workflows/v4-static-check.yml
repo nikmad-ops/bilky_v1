@@ -17,3 +17,5 @@ jobs:
           node-version: 22
       - run: node --check src/production-core.js
       - run: node --check src/dom-audit.js
+
+# v4 check
