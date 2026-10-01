@@ -160,6 +160,7 @@ jobs:
                 terminal_status="${status}"
                 terminal_fact="${fact}"
                 terminal_http="${http}"
+                terminal_duration="${duration}"
                 terminal_attempt="${ATTEMPT}"
                 echo "V4 TERMINAL SUCCESS on attempt ${ATTEMPT}: ${status} fact=${fact}"
                 break
