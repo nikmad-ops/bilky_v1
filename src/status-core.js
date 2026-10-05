@@ -233,9 +233,17 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
 
       try {
         await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
-          captchaEvents.push(event);
+          const safeEvent = {
+            at: new Date().toISOString(),
+            status: event?.status || "unknown",
+            type: event?.type || "unknown",
+            durationMs:
+              typeof event?.duration === "number" ? event.duration : null,
+            solved: event?.solved === true,
+          };
+          captchaEvents.push(safeEvent);
           log(
-            `STATUS CAPTCHA: status=${event?.status || "unknown"} type=${event?.type || "unknown"} durationMs=${event?.duration ?? "n/a"}`
+            `STATUS CAPTCHA: status=${safeEvent.status} type=${safeEvent.type} durationMs=${safeEvent.durationMs ?? "n/a"}`
           );
         });
       } catch (error) {
