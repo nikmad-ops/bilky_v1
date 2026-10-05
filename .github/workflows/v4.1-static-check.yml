@@ -36,6 +36,8 @@ jobs:
       - name: Parse v4.1 workflow YAML
         run: |
           ruby -e 'require "yaml"; YAML.load_file(".github/workflows/workshift-v4.1-master.yml"); YAML.load_file(".github/workflows/status-v4.1.yml"); YAML.load_file(".github/workflows/v4.1-static-check.yml"); puts "YAML parse OK"'
+      - name: Install dependencies for static imports
+        run: npm install --no-audit --no-fund
       - name: Validate v4.1 invariants
         run: node scripts/v4.1-static-check.mjs
       - name: Test v4.1 control-plane behavior offline
