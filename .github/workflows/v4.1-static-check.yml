@@ -9,6 +9,8 @@ on:
       - 'src/production-core.js'
       - '.github/workflows/workshift-v4.1-master.yml'
       - 'scripts/v4.1-static-check.mjs'
+      - 'cloudflare/bilky-v4.1-control-plane.js'
+      - '.github/workflows/status-v4.1.yml'
   workflow_dispatch:
 
 jobs:
@@ -25,5 +27,6 @@ jobs:
           node --check src/production-core.js
           node --check src/workshift.js
           node --check scripts/v4.1-static-check.mjs
+          node --check cloudflare/bilky-v4.1-control-plane.js
       - name: Validate v4.1 invariants
         run: node scripts/v4.1-static-check.mjs
