@@ -134,6 +134,14 @@ async function telegramAnswer(env, callbackId) {
   });
 }
 
+async function telegramWebhookSecret(botToken) {
+  const input = new TextEncoder().encode(`bilky-v4.1:${botToken}`);
+  const digest = await crypto.subtle.digest("SHA-256", input);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function selfActionKeyboard() {
   return {
     inline_keyboard: [
@@ -219,8 +227,9 @@ async function handleNikTelegramCallback(env, callback) {
 
 async function handleNikTelegramWebhook(request, env) {
   const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+  const expectedSecret = await telegramWebhookSecret(env.TELEGRAM_BOT_TOKEN);
 
-  if (env.WEBHOOK_SETUP_KEY && secret !== env.WEBHOOK_SETUP_KEY) {
+  if (!secret || secret !== expectedSecret) {
     return new Response("Unauthorized", { status: 401 });
   }
 
