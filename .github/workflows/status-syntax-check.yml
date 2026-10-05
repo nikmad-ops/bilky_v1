@@ -1,0 +1,19 @@
+name: Bilky v4.1 Status Syntax Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/status-syntax-check.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --check src/status.js
