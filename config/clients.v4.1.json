@@ -1,0 +1,61 @@
+{
+  "version": "4.1",
+  "timezone": "Europe/Madrid",
+  "clients": {
+    "nik": {
+      "label": "Nik",
+      "enabled": true,
+      "scheduled": true,
+      "airtopProfile": "bilky-nik",
+      "githubEnvironment": "client-nik",
+      "telegramRecipientMode": "client-secret"
+    },
+    "alena": {
+      "label": "Alena",
+      "enabled": false,
+      "scheduled": false,
+      "airtopProfile": "bilky-alena",
+      "githubEnvironment": "client-alena",
+      "telegramRecipientMode": "client-secret"
+    },
+    "irakli": {
+      "label": "Irakli",
+      "enabled": false,
+      "scheduled": false,
+      "airtopProfile": "bilky-irakli",
+      "githubEnvironment": "client-irakli",
+      "telegramRecipientMode": "client-secret"
+    }
+  },
+  "permissions": {
+    "admin": {
+      "runTargets": ["nik", "alena", "irakli"],
+      "statusTargets": ["nik", "alena", "irakli"]
+    },
+    "alena": {
+      "runTargets": ["alena", "irakli"],
+      "statusTargets": ["alena"]
+    },
+    "default": {
+      "runTargets": ["self"],
+      "statusTargets": ["self"]
+    }
+  },
+  "windows": {
+    "morning": {
+      "start": "07:55",
+      "end": "09:30"
+    },
+    "evening": {
+      "start": "16:30",
+      "end": "18:05"
+    }
+  },
+  "recovery": {
+    "cycles": 3,
+    "attemptsPerCycle": 5,
+    "retryMinutes": 3,
+    "airtopSessionBudgetMs": 28000,
+    "postLoginStateTimeoutMs": 8000
+  }
+}
