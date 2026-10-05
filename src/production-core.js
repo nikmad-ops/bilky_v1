@@ -58,13 +58,16 @@ function factFromTitle(value) {
 }
 
 export function factsFromHttp200(body) {
-  const times = [...String(body || "").matchAll(/\b(\d{2}:\d{2}:\d{2})\b/g)]
-    .map((match) => match[1]);
+  const facts = [
+    ...String(body || "").matchAll(
+      /data-original-title=["']\d{2}\/\d{2}\/\d{4}\s+(\d{2}:\d{2}:\d{2})["']/g
+    ),
+  ].map((match) => match[1]);
 
   return {
-    morning: times[0] || null,
-    evening: times[1] || null,
-    all: times,
+    morning: facts[0] || null,
+    evening: facts[1] || null,
+    all: facts,
   };
 }
 
