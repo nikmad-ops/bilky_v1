@@ -323,6 +323,12 @@ export default {
       return new Response("bilky v4.1 control plane", { status: 200 });
     }
 
+    // Internal actions are expected only through the Cloudflare service binding.
+    // The synthetic hostname prevents direct public HTTP calls from dispatching jobs.
+    if (!["nik-v4.internal", "bilky-v4.internal"].includes(url.hostname)) {
+      return new Response("Not found", { status: 404 });
+    }
+
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
     }
