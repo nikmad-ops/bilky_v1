@@ -21,3 +21,13 @@ jobs:
           set -euo pipefail
           DATA=$(curl --fail --silent --show-error "https://api.telegram.org/bot${ADMIN_TELEGRAM_BOT_TOKEN}/getWebhookInfo")
           echo "$DATA" | jq '{ok, result: {url: .result.url, pending_update_count: .result.pending_update_count, last_error_date: .result.last_error_date, last_error_message: .result.last_error_message, max_connections: .result.max_connections, has_custom_certificate: .result.has_custom_certificate}}'
+
+      - name: Send outbound diagnostic
+        shell: bash
+        env:
+          ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
+          ADMIN_TELEGRAM_CHAT_ID: ${{ secrets.ADMIN_TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error             --request POST             --header 'Content-Type: application/json'             --data "$(jq -nc --arg chat_id "$ADMIN_TELEGRAM_CHAT_ID" --arg text "Bilky v4.1 diagnostic: Telegram outbound OK." '{chat_id:$chat_id,text:$text}')"             "https://api.telegram.org/bot${ADMIN_TELEGRAM_BOT_TOKEN}/sendMessage" >/dev/null
+          echo "OUTBOUND_OK"
