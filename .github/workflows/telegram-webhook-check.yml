@@ -1,0 +1,23 @@
+name: Telegram Webhook Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/telegram-webhook-check.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: client-nik
+    steps:
+      - name: Check admin Telegram webhook
+        shell: bash
+        env:
+          ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          DATA=$(curl --fail --silent --show-error "https://api.telegram.org/bot${ADMIN_TELEGRAM_BOT_TOKEN}/getWebhookInfo")
+          echo "$DATA" | jq '{ok, result: {url: .result.url, pending_update_count: .result.pending_update_count, last_error_date: .result.last_error_date, last_error_message: .result.last_error_message, max_connections: .result.max_connections, has_custom_certificate: .result.has_custom_certificate}}'
