@@ -8,6 +8,7 @@ on:
       - 'config/clients.v4.1.json'
       - 'src/production-core.js'
       - 'src/status-core.js'
+      - 'src/status.js'
       - '.github/workflows/workshift-v4.1-master.yml'
       - 'scripts/v4.1-static-check.mjs'
       - 'scripts/v4.1-control-plane-test.mjs'
