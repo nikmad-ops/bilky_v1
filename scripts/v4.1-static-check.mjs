@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { factsFromHttp200 } from "../src/production-core.js";
 
 const config = JSON.parse(fs.readFileSync("config/clients.v4.1.json", "utf8"));
 const workflow = fs.readFileSync(".github/workflows/workshift-v4.1-master.yml", "utf8");
@@ -25,6 +26,18 @@ const statusCore = fs.readFileSync("src/status-core.js", "utf8");
 
 assert(!productionCore.includes("CAPTCHA_SOLVER_BUDGET_MS"), "CAPTCHA must not have a separate solver budget");
 assert(productionCore.includes("AIRTOP_SESSION_BUDGET_MS = 28000"), "Production session budget must remain 28000ms");
+
+const noisyMorning = '<span>irrelevant 08:17:00</span><i data-original-title="05/10/2026 08:00:46" class="fe fe-clock"></i>';
+const parsedMorning = factsFromHttp200(noisyMorning);
+assert(parsedMorning.morning === "08:00:46", "Morning fact parser must ignore unrelated times");
+assert(parsedMorning.evening === null, "Morning-only response must not invent Evening fact");
+
+const parsedEvening = factsFromHttp200(
+  '<i data-original-title="05/10/2026 08:00:46" class="fe fe-clock"></i>' +
+  '<i data-original-title="05/10/2026 16:35:46" class="fe fe-clock"></i>'
+);
+assert(parsedEvening.morning === "08:00:46", "Evening response must retain Morning fact");
+assert(parsedEvening.evening === "16:35:46", "Evening response must parse the second clock fact");
 assert(statusCore.includes('process.env.AIRTOP_PROFILE_NAME || "bilky-nik"'), "Status core must accept per-user Airtop profile");
 assert(!statusCore.includes(':visible'), "Status dashboard detection must not depend on :visible");
 
