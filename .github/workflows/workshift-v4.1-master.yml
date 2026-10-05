@@ -107,13 +107,13 @@ jobs:
           if [ "${MODE}" = "scheduled" ]; then
             NOW=$(TZ=Europe/Madrid date +%H%M)
             if [ "${ACTION}" = "morning" ]; then
-              [ "${NOW}" -ge 0755 ] && [ "${NOW}" -le 0825 ] || { echo "Outside morning window"; exit 1; }
+              [ "${NOW}" -ge 0755 ] && [ "${NOW}" -le 0930 ] || { echo "Outside morning window 07:55-09:30 Europe/Madrid"; exit 1; }
             else
-              [ "${NOW}" -ge 1630 ] && [ "${NOW}" -le 1700 ] || { echo "Outside evening window"; exit 1; }
+              [ "${NOW}" -ge 1630 ] && [ "${NOW}" -le 1805 ] || { echo "Outside evening window 16:30-18:05 Europe/Madrid"; exit 1; }
             fi
           fi
 
-      - name: Checkout v4 master
+      - name: Checkout v4.1 master
         uses: actions/checkout@v4
         with:
           repository: nikmad-ops/bilky_v1
