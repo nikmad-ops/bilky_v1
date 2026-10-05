@@ -7,7 +7,6 @@ export const WORKSHIFT_URL =
 export const TIMEZONE = "Europe/Madrid";
 
 const AIRTOP_SESSION_BUDGET_MS = 28000;
-const CAPTCHA_SOLVER_BUDGET_MS = 25000;
 const POST_LOGIN_STATE_TIMEOUT_MS = 8000;
 const FORENSIC_CAPTURE_BUDGET_MS = 1500;
 const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
@@ -104,8 +103,6 @@ export function createProductionClient({
   }
   let sessionReadyAt = 0;
   let sessionDeadline = 0;
-  let captchaDetectedAt = 0;
-  let captchaSolvedAt = 0;
 
   async function connect() {
     log(`Creating Airtop session. attempt=${attempt}/5 solveCaptcha=true proxy=ES sticky=true`);
@@ -150,18 +147,6 @@ export function createProductionClient({
           solved: event?.solved === true,
         };
         captchaEvents.push(safeEvent);
-
-        if (status === "detected" || status === "processing") {
-          if (!captchaDetectedAt) captchaDetectedAt = Date.now();
-        }
-
-        if (status === "completed" || event?.solved === true) {
-          captchaSolvedAt = Date.now();
-        }
-
-        if (status === "failed") {
-          captchaDetectedAt = captchaDetectedAt || Date.now();
-        }
 
         log(`CAPTCHA event: status=${status} type=${type} durationMs=${duration}`);
         fs.writeFileSync(
@@ -225,15 +210,6 @@ export function createProductionClient({
 
   function assertSessionBudget(stage) {
     const remaining = remainingSessionMs();
-
-    if (captchaDetectedAt && !captchaSolvedAt) {
-      const captchaAge = Date.now() - captchaDetectedAt;
-      if (captchaAge >= CAPTCHA_SOLVER_BUDGET_MS) {
-        throw new Error(
-          `CAPTCHA solver budget exceeded at ${stage}: ${captchaAge}ms >= ${CAPTCHA_SOLVER_BUDGET_MS}ms`
-        );
-      }
-    }
 
     if (remaining <= 0) {
       throw new Error(
@@ -900,8 +876,6 @@ export function createProductionClient({
     sessionId = null;
     sessionReadyAt = 0;
     sessionDeadline = 0;
-    captchaDetectedAt = 0;
-    captchaSolvedAt = 0;
   }
 
   return {
