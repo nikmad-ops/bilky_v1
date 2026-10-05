@@ -1,0 +1,29 @@
+name: Bilky v4.1 Static Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'config/clients.v4.1.json'
+      - 'src/production-core.js'
+      - '.github/workflows/workshift-v4.1-master.yml'
+      - 'scripts/v4.1-static-check.mjs'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check JavaScript syntax
+        run: |
+          node --check src/production-core.js
+          node --check src/workshift.js
+          node --check scripts/v4.1-static-check.mjs
+      - name: Validate v4.1 invariants
+        run: node scripts/v4.1-static-check.mjs
