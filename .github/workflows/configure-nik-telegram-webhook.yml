@@ -1,0 +1,35 @@
+name: Configure Nik Telegram Webhook
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/configure-nik-telegram-webhook.yml'
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: client-nik
+    steps:
+      - name: Configure secure webhook and verify
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          HOOK_URL="https://bilky-scheduler.nikolay-cf0.workers.dev/telegram"
+          HOOK_SECRET=$(printf '%s' "bilky-v4.1:${TELEGRAM_BOT_TOKEN}" | sha256sum | awk '{print $1}')
+
+          curl --fail --silent --show-error             --request POST             --header 'Content-Type: application/json'             --data "$(jq -nc --arg url "$HOOK_URL" --arg secret "$HOOK_SECRET" '{url:$url,secret_token:$secret,drop_pending_updates:false}')"             "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" >/dev/null
+
+          INFO=$(curl --fail --silent --show-error "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo")
+          URL=$(echo "$INFO" | jq -r '.result.url // ""')
+          [ "$URL" = "$HOOK_URL" ] || { echo "Webhook URL mismatch"; exit 1; }
+
+          HTTP=$(curl --silent --output /dev/null --write-out '%{http_code}'             --request POST             --header 'Content-Type: application/json'             --header "X-Telegram-Bot-Api-Secret-Token: $HOOK_SECRET"             --data "$(jq -nc --argjson chat "${TELEGRAM_CHAT_ID}" '{update_id:999999999,message:{message_id:999999999,chat:{id:$chat},text:"__qa_ping__"}}')"             "$HOOK_URL")
+          [ "$HTTP" = "200" ] || { echo "Webhook QA ping failed HTTP $HTTP"; exit 1; }
+
+          echo "Webhook configured and QA ping accepted"
