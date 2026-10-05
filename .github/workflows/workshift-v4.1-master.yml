@@ -12,6 +12,9 @@ on:
       airtop_profile:
         required: true
         type: string
+      github_environment:
+        required: true
+        type: string
       action:
         required: true
         type: string
@@ -53,6 +56,11 @@ on:
         required: true
         default: 'bilky-nik'
         type: string
+      github_environment:
+        description: 'GitHub Environment holding client secrets'
+        required: true
+        default: 'client-nik'
+        type: string
       action:
         description: 'morning or evening'
         required: true
@@ -77,6 +85,7 @@ jobs:
   workshift:
     runs-on: ubuntu-latest
     timeout-minutes: 70
+    environment: ${{ inputs.github_environment }}
 
     steps:
       - name: Safety gate
