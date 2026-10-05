@@ -20,6 +20,14 @@ assert(config.recovery?.retryMinutes === 3, "Retry interval must equal 3 minutes
 assert(config.recovery?.airtopSessionBudgetMs === 28000, "Airtop session budget must remain 28000ms");
 assert(config.recovery?.postLoginStateTimeoutMs === 8000, "Post-login timeout must remain 8000ms");
 
+const productionCore = fs.readFileSync("src/production-core.js", "utf8");
+const statusCore = fs.readFileSync("src/status-core.js", "utf8");
+
+assert(!productionCore.includes("CAPTCHA_SOLVER_BUDGET_MS"), "CAPTCHA must not have a separate solver budget");
+assert(productionCore.includes("AIRTOP_SESSION_BUDGET_MS = 28000"), "Production session budget must remain 28000ms");
+assert(statusCore.includes('process.env.AIRTOP_PROFILE_NAME || "bilky-nik"'), "Status core must accept per-user Airtop profile");
+assert(!statusCore.includes(':visible'), "Status dashboard detection must not depend on :visible");
+
 for (const required of [
   "timeout-minutes: 70",
   "for CYCLE in 1 2 3",
