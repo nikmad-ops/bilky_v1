@@ -25,8 +25,12 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check src/production-core.js
+          node --check src/status-core.js
           node --check src/workshift.js
           node --check scripts/v4.1-static-check.mjs
           node --check cloudflare/bilky-v4.1-control-plane.js
+      - name: Parse v4.1 workflow YAML
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/workshift-v4.1-master.yml"); YAML.load_file(".github/workflows/status-v4.1.yml"); YAML.load_file(".github/workflows/v4.1-static-check.yml"); puts "YAML parse OK"'
       - name: Validate v4.1 invariants
         run: node scripts/v4.1-static-check.mjs
