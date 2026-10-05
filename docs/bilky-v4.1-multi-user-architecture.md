@@ -343,7 +343,7 @@ flowchart TB
     subgraph Users["Users / Telegram"]
       ADMIN[Admin: Nik]
       ALENA[Alena]
-      IRAKLI[Irakli<br/>no direct notifications]
+      IRAKLI[Irakli<br/>ordinary user; recipient is configured by secrets]
     end
 
     subgraph CF["Cloudflare"]
@@ -807,7 +807,8 @@ Secrets в такой record не входят.
 - `githubEnvironment` — где лежат secrets;
 - `airtopProfile` — Airtop browser profile;
 - `scheduled` — участвует ли пользователь в cron;
-- `permissions/routing` — кто может Run/Status и кто получает notifications.
+- `permissions` — кто может Run/Status для этого пользователя;
+- `telegram recipient configuration` — куда уходят пользовательские notifications; это конфигурация получателя, а не особый тип пользователя.
 
 ### 16.2 Независимость runs
 
@@ -844,9 +845,29 @@ Concurrency key:
 
 ### Irakli
 
-- automation работает;
-- прямые Telegram notifications не отправляются;
-- управление идёт через разрешённый интерфейс Alena/admin.
+Irakli — **обычный самостоятельный пользователь**, а не специальный технический тип пользователя.
+
+У него должны быть собственные:
+
+- Bilky credentials;
+- Airtop API key;
+- Airtop profile;
+- state/idempotency;
+- run history;
+- user configuration.
+
+Получатель его обычных Telegram-сообщений задаётся **конфигурацией/secrets**, а не специальной логикой переадресации в browser/workflow code. Сейчас в Irakli client secrets в качестве client Telegram recipient используется чат Alena. Если в будущем заменить эти secrets на Telegram bot/chat Irakli, обычные сообщения должны начать приходить Irakli без изменения execution architecture.
+
+Отдельно существует **делегирование прав управления** в Telegram Control Plane. Это не routing уведомлений и не делает Irakli «подпользователем» Alena.
+
+Текущее подтверждённое делегирование:
+
+- admin/Nik может управлять Nik, Alena и Irakli;
+- Alena может сделать Manual Run для Alena или Irakli;
+- текущая команда Status в интерфейсе Alena проверяет только Alena;
+- admin Status позволяет выбрать Nik, Alena или Irakli.
+
+Если будет принято решение дать Alena также Status для Irakli, это должно быть отдельным permission rule в Control Plane, а не технической переадресацией сообщений.
 
 ### Будущий обычный пользователь
 
