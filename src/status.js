@@ -394,7 +394,7 @@ function classifyDay(
 
     return {
       line:
-        `❌ ${label}: ERROR: ${state.error || "day data unavailable"}`,
+        `⚠️ ${label}: Day data unavailable`,
       total: 0,
     };
   }
@@ -432,7 +432,7 @@ function classifyDay(
   ) {
     return {
       line:
-        `❌ ${label}: ERROR: morning fact missing; evening=${evening}`,
+        `⚠️ ${label}: Morning not confirmed; Evening=${evening}`,
       total: 0,
     };
   }
@@ -457,7 +457,7 @@ function classifyDay(
 
     return {
       line:
-        `❌ ${label}: ERROR: morning fact missing`,
+        `🟡 ${label}: Morning not confirmed yet`,
       total: 0,
     };
   }
@@ -482,7 +482,7 @@ function classifyDay(
 
     return {
       line:
-        `❌ ${label}: ${morning}, ERROR: evening fact missing`,
+        `🟡 ${label}: ${morning}, Evening not confirmed yet`,
       total: 0,
     };
   }
@@ -492,7 +492,7 @@ function classifyDay(
   ) {
     return {
       line:
-        `❌ ${label}: ${morning}, ${evening}, ERROR: invalid DAY interval`,
+        `⚠️ ${label}: ${morning}, ${evening}, time data needs review`,
       total: 0,
     };
   }
