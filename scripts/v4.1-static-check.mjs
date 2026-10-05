@@ -2,6 +2,8 @@ import fs from "node:fs";
 
 const config = JSON.parse(fs.readFileSync("config/clients.v4.1.json", "utf8"));
 const workflow = fs.readFileSync(".github/workflows/workshift-v4.1-master.yml", "utf8");
+const statusWorkflow = fs.readFileSync(".github/workflows/status-v4.1.yml", "utf8");
+const controlPlane = fs.readFileSync("cloudflare/bilky-v4.1-control-plane.js", "utf8");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -31,6 +33,35 @@ for (const required of [
 }
 
 assert(!workflow.includes("ERROR after 5/5"), "User-facing 5/5 ERROR must not exist in v4.1 workflow");
+
+for (const required of [
+  'WORKSHIFT_WORKFLOW = "workshift-v4.1-master.yml"',
+  'STATUS_WORKFLOW = "status-v4.1.yml"',
+  'enabled: true',
+  'enabled: false',
+  'v4.1:scheduled:',
+  'v4.1:manual:',
+  'v4.1:status:',
+  'now <= 9 * 60 + 30',
+  'now <= 18 * 60 + 5',
+]) {
+  assert(controlPlane.includes(required), `Missing control-plane invariant: ${required}`);
+}
+
+assert(
+  (controlPlane.match(/enabled: false/g) || []).length >= 2,
+  "Alena and Irakli must remain disabled in v4.1 control plane before migration"
+);
+
+for (const required of [
+  "github_environment",
+  "client_id",
+  "client_label",
+  "recipient",
+  "AIRTOP_PROFILE_NAME",
+]) {
+  assert(statusWorkflow.includes(required), `Missing v4.1 status invariant: ${required}`);
+}
 
 console.log("v4.1 static architecture checks passed");
 
