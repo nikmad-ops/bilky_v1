@@ -19,7 +19,13 @@ globalThis.fetch = async (url, options = {}) => {
 };
 
 function env() {
-  return { GITHUB_TOKEN: "test-token", BILKY_STATE: new MockKV() };
+  return {
+    GITHUB_TOKEN: "test-token",
+    BILKY_STATE: new MockKV(),
+    TELEGRAM_BOT_TOKEN: "telegram-test-token",
+    TELEGRAM_CHAT_ID: "123",
+    WEBHOOK_SETUP_KEY: "telegram-webhook-secret",
+  };
 }
 
 function scheduledTime(iso) {
@@ -156,6 +162,50 @@ async function runScheduled(iso) {
   assert.match(calls[0].url, /status-v4\.1\.yml\/dispatches$/);
   assert.equal(calls[0].body.inputs.github_environment, "client-nik");
   assert.equal(calls[0].body.inputs.recipient, "admin");
+}
+
+// Nik personal Telegram Status is accepted and dispatches generic v4.1 Status.
+{
+  calls.length = 0;
+  const e = env();
+  const req = new Request("https://bilky-scheduler.example/telegram", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": "telegram-webhook-secret",
+    },
+    body: JSON.stringify({
+      message: {
+        message_id: 77,
+        chat: { id: 123 },
+        text: "Status",
+      },
+    }),
+  });
+  const res = await worker.fetch(req, e);
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /api\.telegram\.org\/bottelegram-test-token\/sendMessage$/);
+  assert.match(calls[1].url, /status-v4\.1\.yml\/dispatches$/);
+  assert.equal(calls[1].body.inputs.client_id, "nik");
+  assert.equal(calls[1].body.inputs.recipient, "client");
+}
+
+// Telegram webhook rejects an invalid secret.
+{
+  calls.length = 0;
+  const e = env();
+  const req = new Request("https://bilky-scheduler.example/telegram", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-Telegram-Bot-Api-Secret-Token": "wrong-secret",
+    },
+    body: JSON.stringify({ message: { chat: { id: 123 }, text: "Status" } }),
+  });
+  const res = await worker.fetch(req, e);
+  assert.equal(res.status, 401);
+  assert.equal(calls.length, 0);
 }
 
 // Direct public access to internal dispatch endpoints is blocked.
