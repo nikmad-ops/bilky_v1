@@ -33,3 +33,5 @@ for (const required of [
 assert(!workflow.includes("ERROR after 5/5"), "User-facing 5/5 ERROR must not exist in v4.1 workflow");
 
 console.log("v4.1 static architecture checks passed");
+
+// Triggered automatically on v4.1 architecture changes.
