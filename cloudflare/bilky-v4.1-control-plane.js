@@ -90,6 +90,158 @@ function allowed(role, kind, clientId) {
   return targets.includes(clientId);
 }
 
+const TELEGRAM_API = "https://api.telegram.org";
+
+function isStatusCommand(text) {
+  return ["status", "/status", "статус", "/статус"].includes(
+    String(text || "").trim().toLowerCase()
+  );
+}
+
+function isRunCommand(text) {
+  return ["run", "/run", "запуск", "/запуск"].includes(
+    String(text || "").trim().toLowerCase()
+  );
+}
+
+async function telegramCall(token, method, payload) {
+  const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Telegram ${method} HTTP ${response.status}: ${await response.text()}`
+    );
+  }
+
+  return response.json();
+}
+
+async function telegramSend(env, text, extra = {}) {
+  return telegramCall(env.TELEGRAM_BOT_TOKEN, "sendMessage", {
+    chat_id: env.TELEGRAM_CHAT_ID,
+    text,
+    ...extra,
+  });
+}
+
+async function telegramAnswer(env, callbackId) {
+  return telegramCall(env.TELEGRAM_BOT_TOKEN, "answerCallbackQuery", {
+    callback_query_id: callbackId,
+  });
+}
+
+function selfActionKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Morning", callback_data: "self-run:morning" },
+        { text: "Evening", callback_data: "self-run:evening" },
+      ],
+    ],
+  };
+}
+
+async function handleNikTelegramMessage(env, message) {
+  const chatId = String(message?.chat?.id || "");
+  if (chatId !== String(env.TELEGRAM_CHAT_ID)) return;
+
+  if (isStatusCommand(message?.text)) {
+    await telegramSend(env, "Loading Bilky status...");
+    const requestId = String(message?.message_id || Date.now());
+    const result = await dispatchStatusOnce(
+      env,
+      "nik",
+      "nik",
+      chatId,
+      "client",
+      requestId
+    );
+
+    if (!result.ok) {
+      throw new Error(result.error || "status-dispatch-failed");
+    }
+    return;
+  }
+
+  if (isRunCommand(message?.text)) {
+    if (!isWeekday(madridParts())) {
+      await telegramSend(env, "Сегодня выходной. Запуск недоступен.");
+      return;
+    }
+
+    await telegramSend(env, "What do you want to run?", {
+      reply_markup: selfActionKeyboard(),
+    });
+  }
+}
+
+async function handleNikTelegramCallback(env, callback) {
+  const chatId = String(callback?.message?.chat?.id || "");
+  if (chatId !== String(env.TELEGRAM_CHAT_ID)) return;
+
+  await telegramAnswer(env, callback.id);
+
+  const data = String(callback?.data || "");
+  if (!data.startsWith("self-run:")) return;
+
+  const action = data.slice("self-run:".length);
+  const result = await dispatchManualOnce(
+    env,
+    "nik",
+    "nik",
+    action,
+    String(callback.id)
+  );
+
+  if (result.weekend) {
+    await telegramSend(env, "Сегодня выходной. Запуск недоступен.");
+    return;
+  }
+
+  if (!result.ok) {
+    await telegramSend(
+      env,
+      `Bilky for Nik: could not start the run. ${result.error || "Unknown error"}`
+    );
+    return;
+  }
+
+  const label = action === "morning" ? "Morning" : "Evening";
+  await telegramSend(
+    env,
+    `Bilky for Nik: ${label} started. Automatic recovery is enabled (up to 15 attempts).`
+  );
+}
+
+async function handleNikTelegramWebhook(request, env) {
+  const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+
+  if (env.WEBHOOK_SETUP_KEY && secret !== env.WEBHOOK_SETUP_KEY) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const update = await request.json().catch(() => ({}));
+
+  try {
+    if (update.callback_query) {
+      await handleNikTelegramCallback(env, update.callback_query);
+    } else if (update.message) {
+      await handleNikTelegramMessage(env, update.message);
+    }
+  } catch (error) {
+    console.error(
+      "Nik Telegram webhook error",
+      String(error?.message || error).slice(0, 500)
+    );
+  }
+
+  return new Response("OK", { status: 200 });
+}
+
 async function githubRequest(env, path, options = {}) {
   const response = await fetch(`https://api.github.com${path}`, {
     ...options,
@@ -304,6 +456,10 @@ export default {
 
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/telegram") {
+      return handleNikTelegramWebhook(request, env);
+    }
 
     if (url.pathname === "/health") {
       return Response.json({
