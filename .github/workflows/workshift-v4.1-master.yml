@@ -280,12 +280,18 @@ jobs:
 
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
 
+          RESULT_PRESENT=false
           if [ -s v4-result.json ]; then
+            RESULT_PRESENT=true
             SUCCESS=$(jq -r '.success' v4-result.json)
             FACT=$(jq -r '.fact // empty' v4-result.json)
+            RESULT_STATUS=$(jq -r '.status // empty' v4-result.json)
+            RESULT_ATTEMPTS=$(jq -r '.attempts // 0' v4-result.json)
           else
             SUCCESS=false
             FACT=""
+            RESULT_STATUS=""
+            RESULT_ATTEMPTS=0
           fi
 
           if [ "$ACTION" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
@@ -308,7 +314,11 @@ jobs:
             ADMIN_MESSAGE="$USER_MESSAGE"
           else
             USER_MESSAGE="Bilky for ${CLIENT_LABEL}: ${LABEL} could not be confirmed automatically yet. No action is required from you."
-            ADMIN_MESSAGE="⚠️ Bilky for ${CLIENT_LABEL}: ${LABEL} requires attention. Automatic recovery exhausted after 15 attempts."
+            if [ "$RESULT_PRESENT" = "true" ] && [ "$RESULT_STATUS" = "requires_attention" ] && [ "$RESULT_ATTEMPTS" = "15" ]; then
+              ADMIN_MESSAGE="⚠️ Bilky for ${CLIENT_LABEL}: ${LABEL} requires attention. Automatic recovery exhausted after 15 attempts."
+            else
+              ADMIN_MESSAGE="⚠️ Bilky for ${CLIENT_LABEL}: ${LABEL} requires attention. Recovery workflow ended unexpectedly before a terminal result."
+            fi
           fi
 
           CLIENT_RC=0
