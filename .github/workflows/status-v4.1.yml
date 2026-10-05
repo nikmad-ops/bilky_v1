@@ -1,0 +1,118 @@
+name: Bilky v4.1 Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: 'Client id'
+        required: true
+        type: string
+      client_label:
+        description: 'Client label'
+        required: true
+        type: string
+      github_environment:
+        description: 'GitHub Environment holding client secrets'
+        required: true
+        type: string
+      airtop_profile:
+        description: 'Airtop profile'
+        required: true
+        type: string
+      recipient:
+        description: 'client or admin'
+        required: true
+        type: choice
+        options:
+          - client
+          - admin
+      chat_id:
+        description: 'Authorized Telegram chat id'
+        required: true
+        type: string
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.github_environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Read Bilky weekly status
+        env:
+          REQUEST_CHAT_ID: ${{ inputs.chat_id }}
+          TELEGRAM_CHAT_ID: ${{ inputs.chat_id }}
+          CLIENT_NAME: ${{ inputs.client_label }}
+          AIRTOP_PROFILE_NAME: ${{ inputs.airtop_profile }}
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
+        run: npm run status
+
+      - name: Send status
+        if: success()
+        shell: bash
+        env:
+          RECIPIENT: ${{ inputs.recipient }}
+          REQUEST_CHAT_ID: ${{ inputs.chat_id }}
+          CLIENT_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPORT=$(cat status-result.txt)
+
+          if [ "$RECIPIENT" = "admin" ]; then
+            BOT_TOKEN="$ADMIN_BOT_TOKEN"
+          else
+            BOT_TOKEN="$CLIENT_BOT_TOKEN"
+          fi
+
+          [ -n "$BOT_TOKEN" ] || { echo "Missing Telegram bot token for recipient=$RECIPIENT"; exit 1; }
+
+          curl --fail --silent --show-error             --request POST             --header 'Content-Type: application/json'             --data "$(jq -nc --arg chat_id "$REQUEST_CHAT_ID" --arg text "$REPORT" '{chat_id:$chat_id,text:$text}')"             "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" >/dev/null
+
+      - name: Send soft status failure
+        if: failure()
+        continue-on-error: true
+        shell: bash
+        env:
+          RECIPIENT: ${{ inputs.recipient }}
+          REQUEST_CHAT_ID: ${{ inputs.chat_id }}
+          CLIENT_LABEL: ${{ inputs.client_label }}
+          CLIENT_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "$RECIPIENT" = "admin" ]; then
+            BOT_TOKEN="$ADMIN_BOT_TOKEN"
+          else
+            BOT_TOKEN="$CLIENT_BOT_TOKEN"
+          fi
+
+          [ -n "$BOT_TOKEN" ] || exit 0
+
+          MESSAGE="Bilky status for ${CLIENT_LABEL} could not be confirmed automatically yet. Please try again later."
+
+          curl --fail --silent --show-error             --request POST             --header 'Content-Type: application/json'             --data "$(jq -nc --arg chat_id "$REQUEST_CHAT_ID" --arg text "$MESSAGE" '{chat_id:$chat_id,text:$text}')"             "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" >/dev/null || true
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bilky-v4.1-status-${{ github.run_id }}
+          path: |
+            diagnostics/
+            status-result.txt
+            status-error.txt
+          if-no-files-found: ignore
+          retention-days: 14
