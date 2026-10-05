@@ -8,7 +8,7 @@ const WORKSHIFT_URL =
   "https://panel.bilky.es/employee/hour-registration/hour-registration/show/ekzv7lndr9eqy5da";
 
 const AIRTOP_STATUS_BUDGET_MS = 28000;
-const AIRTOP_PROFILE_NAME = "bilky-nik";
+const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
 
 export function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
@@ -83,23 +83,35 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
         else el.click();
       });
 
-      const deadline = Date.now() + 60000;
+      const deadline = Date.now() + 8000;
+      const link = page
+        .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
+        .first();
+
       while (Date.now() < deadline) {
-        if (!page.url().includes("/auth/login")) break;
-        await sleep(300);
+        const hasDashboardUrl =
+          page.url().includes("/employee/dashboard/") ||
+          page.url().includes("/employee/control/panel");
+        const hasDashboardLink = (await link.count()) > 0;
+        const hasWorkshift = (await page.locator('[id^="container_"]').count()) > 0;
+
+        if (hasDashboardUrl || hasDashboardLink || hasWorkshift) break;
+        await sleep(250);
       }
 
       if (page.url().includes("/auth/login")) {
         throw new Error("Bilky status login did not complete");
       }
 
-      const link = page
-        .locator('a[href*="/employee/hour-registration/hour-registration/show/"]:visible')
-        .first();
-
-      if (await link.count()) {
+      const hasWorkshift = (await page.locator('[id^="container_"]').count()) > 0;
+      if (!hasWorkshift && (await link.count())) {
+        const href =
+          (await link.getAttribute("href").catch(() => null)) || WORKSHIFT_URL;
         log("STATUS_STAGE=dashboard-workshift");
-        await link.evaluate((el) => el.click());
+        await page.goto(href, {
+          waitUntil: "domcontentloaded",
+          timeout: 12000,
+        });
       }
     }
 
