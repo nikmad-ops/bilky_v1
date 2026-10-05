@@ -15,6 +15,14 @@ globalThis.fetch = async (url, options = {}) => {
     method: options.method || "GET",
     body: options.body ? JSON.parse(options.body) : null,
   });
+
+  if (String(url).includes("api.telegram.org")) {
+    return new Response(JSON.stringify({ ok: true, result: {} }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   return new Response(null, { status: 204 });
 };
 
