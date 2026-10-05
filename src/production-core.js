@@ -93,6 +93,15 @@ export function createProductionClient({
   let page = null;
   const captchaEvents = [];
   const recentNetwork = [];
+
+  function safeUrl(rawUrl) {
+    try {
+      const parsed = new URL(String(rawUrl || ""));
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return "";
+    }
+  }
   let sessionReadyAt = 0;
   let sessionDeadline = 0;
   let captchaDetectedAt = 0;
@@ -129,10 +138,18 @@ export function createProductionClient({
 
     try {
       await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
-        captchaEvents.push(event);
         const status = event?.status || "unknown";
         const type = event?.type || "unknown";
         const duration = event?.duration ?? "n/a";
+        const safeEvent = {
+          at: new Date().toISOString(),
+          status,
+          type,
+          durationMs:
+            typeof event?.duration === "number" ? event.duration : null,
+          solved: event?.solved === true,
+        };
+        captchaEvents.push(safeEvent);
 
         if (status === "detected" || status === "processing") {
           if (!captchaDetectedAt) captchaDetectedAt = Date.now();
@@ -182,7 +199,7 @@ export function createProductionClient({
         kind: "request",
         method: request.method(),
         resourceType: request.resourceType(),
-        url: request.url(),
+        url: safeUrl(request.url()),
       });
       if (recentNetwork.length > 40) recentNetwork.splice(0, recentNetwork.length - 40);
     });
@@ -192,7 +209,7 @@ export function createProductionClient({
         at: new Date().toISOString(),
         kind: "response",
         status: response.status(),
-        url: response.url(),
+        url: safeUrl(response.url()),
       });
       if (recentNetwork.length > 40) recentNetwork.splice(0, recentNetwork.length - 40);
     });
@@ -293,7 +310,7 @@ export function createProductionClient({
       }
     };
 
-    const url = page.url();
+    const url = safeUrl(page.url());
 
     const snapshot = await safe(
       () =>
@@ -329,7 +346,7 @@ export function createProductionClient({
             title: document.title,
             readyState: document.readyState,
             fingerprint: {
-              url: location.href,
+              url: location.origin + location.pathname,
               title: document.title,
               readyState: document.readyState,
               hasLoginTaxId: Boolean(document.querySelector("#taxid")),
@@ -371,7 +388,6 @@ export function createProductionClient({
                     text
                   ),
               },
-              bodyTextSample: text.slice(0, 3000),
             },
             sanitizedDom: "<!doctype html>\n" + clone.outerHTML,
           };
@@ -412,12 +428,38 @@ export function createProductionClient({
 
     if (remaining >= 200) {
       await safe(
-        () =>
-          page.screenshot({
-            path: `${diagnosticsDir}/forensic-${reason}.png`,
-            fullPage: false,
-            timeout: Math.min(500, remaining),
-          }),
+        async () => {
+          await page.evaluate(() => {
+            for (const el of document.querySelectorAll(
+              '#taxid,#password,input[type="password"],[autocomplete="current-password"]'
+            )) {
+              const input = /** @type {HTMLInputElement} */ (el);
+              if (!input.dataset.bilkyMaskOriginalType) {
+                input.dataset.bilkyMaskOriginalType = input.getAttribute("type") || "text";
+              }
+              input.setAttribute("type", "password");
+            }
+          });
+
+          try {
+            await page.screenshot({
+              path: `${diagnosticsDir}/forensic-${reason}.png`,
+              fullPage: false,
+              timeout: Math.min(500, remaining),
+            });
+          } finally {
+            await page.evaluate(() => {
+              for (const el of document.querySelectorAll(
+                '[data-bilky-mask-original-type]'
+              )) {
+                const input = /** @type {HTMLInputElement} */ (el);
+                const original = input.dataset.bilkyMaskOriginalType || "text";
+                input.setAttribute("type", original);
+                delete input.dataset.bilkyMaskOriginalType;
+              }
+            }).catch(() => {});
+          }
+        },
         null
       );
     }
