@@ -1,4 +1,4 @@
-name: Bilky v4.1 Static Check
+name: Bilky | QA
 
 on:
   push:
