@@ -303,6 +303,13 @@ async function handleAdminCallback(env,cb) {
         });
         const label=action==="morning"?"Morning":"Evening";
         if (r.weekend) return send(env.ADMIN_TELEGRAM_BOT_TOKEN,chat,"Сегодня выходной. Запуск недоступен.");
+        if (r.nonWorkingDay) {
+          return send(
+            env.ADMIN_TELEGRAM_BOT_TOKEN,
+            chat,
+            `Bilky for ${clientById(id).name}: ${r.date} is a non-working day${r.reason ? ` (${r.reason})` : ""}. Run is blocked.`
+          );
+        }
         return send(env.ADMIN_TELEGRAM_BOT_TOKEN,chat,`Bilky for ${clientById(id).name}: ${label} started. Automatic recovery is enabled (up to 15 attempts).`);
       } catch(e) {
         return send(env.ADMIN_TELEGRAM_BOT_TOKEN,chat,`Bilky for ${clientById(id).name}: could not start the run. ${e.message}`);
@@ -358,6 +365,13 @@ async function handleAlenaCallback(env,cb) {
           request_id:String(cb.id)
         });
         if (r.weekend) return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,"Сегодня выходной. Запуск недоступен.");
+        if (r.nonWorkingDay) {
+          return send(
+            env.ALENA_TELEGRAM_BOT_TOKEN,
+            chat,
+            `Bilky for Alena: ${r.date} is a non-working day${r.reason ? ` (${r.reason})` : ""}. Run is blocked.`
+          );
+        }
         const label=action==="morning"?"Morning":"Evening";
         return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,`Bilky for Alena: ${label} started. Automatic recovery is enabled (up to 15 attempts).`);
       } catch(e) {
