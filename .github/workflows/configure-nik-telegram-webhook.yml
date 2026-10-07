@@ -1,11 +1,7 @@
-name: Configure Nik Telegram Webhook
+name: Bilky | Maintenance - Telegram Webhook
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/configure-nik-telegram-webhook.yml'
+  workflow_dispatch:
 
 jobs:
   configure:
