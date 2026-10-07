@@ -90,6 +90,34 @@ function allowed(role, kind, clientId) {
   return targets.includes(clientId);
 }
 
+async function getNonWorkingDay(env, clientId, date) {
+  if (!env.BILKY_DB) {
+    throw new Error("BILKY_DB binding is missing");
+  }
+
+  return env.BILKY_DB
+    .prepare(
+      "SELECT date, reason FROM non_working_days WHERE user_id = ? AND date = ? LIMIT 1"
+    )
+    .bind(clientId, date)
+    .first();
+}
+
+async function getNonWorkingDays(env, clientId) {
+  if (!env.BILKY_DB) {
+    throw new Error("BILKY_DB binding is missing");
+  }
+
+  const result = await env.BILKY_DB
+    .prepare(
+      "SELECT date, reason FROM non_working_days WHERE user_id = ? ORDER BY date"
+    )
+    .bind(clientId)
+    .all();
+
+  return Array.isArray(result?.results) ? result.results : [];
+}
+
 const TELEGRAM_API = "https://api.telegram.org";
 
 function isStatusCommand(text) {
@@ -207,6 +235,14 @@ async function handleNikTelegramCallback(env, callback) {
 
   if (result.weekend) {
     await telegramSend(env, "Сегодня выходной. Запуск недоступен.");
+    return;
+  }
+
+  if (result.nonWorkingDay) {
+    await telegramSend(
+      env,
+      `Bilky for Nik: ${result.date} is a non-working day${result.reason ? ` (${result.reason})` : ""}. Run is blocked.`
+    );
     return;
   }
 
@@ -330,6 +366,20 @@ function workshiftInputs(client, action, mode) {
 }
 
 async function dispatchScheduledOnce(env, client, date, action) {
+  const nonWorkingDay = await getNonWorkingDay(env, client.id, date);
+  if (nonWorkingDay) {
+    console.log(
+      `Skipping scheduled ${client.id} ${date} ${action}: non-working day (${nonWorkingDay.reason || "no reason"})`
+    );
+    return {
+      ok: true,
+      dispatched: false,
+      nonWorkingDay: true,
+      date,
+      reason: nonWorkingDay.reason || "",
+    };
+  }
+
   const key = `v4.1:scheduled:${client.id}:${date}:${action}`;
   const payload = { client: client.id, date, action, mode: "scheduled" };
   const reservation = await reserveDispatch(env, key, payload);
@@ -368,6 +418,18 @@ async function dispatchManualOnce(env, role, clientId, action, requestId) {
   const client = clientById(clientId);
   if (!client) {
     return { ok: false, error: "client-not-enabled" };
+  }
+
+  const date = madridDate(now);
+  const nonWorkingDay = await getNonWorkingDay(env, client.id, date);
+  if (nonWorkingDay) {
+    return {
+      ok: true,
+      dispatched: false,
+      nonWorkingDay: true,
+      date,
+      reason: nonWorkingDay.reason || "",
+    };
   }
 
   const key = `v4.1:manual:${client.id}:${requestId}`;
@@ -413,6 +475,8 @@ async function dispatchStatusOnce(
     return { ok: false, error: "client-not-enabled" };
   }
 
+  const nonWorkingDays = await getNonWorkingDays(env, client.id);
+
   if (!["client", "admin"].includes(recipient)) {
     return { ok: false, error: "invalid-recipient" };
   }
@@ -437,6 +501,7 @@ async function dispatchStatusOnce(
       github_environment: client.githubEnvironment,
       recipient,
       chat_id: String(chatId),
+      non_working_days_json: JSON.stringify(nonWorkingDays),
     });
     await markDispatched(env, key, payload, 86400);
     return { ok: true, dispatched: true, duplicate: false };
@@ -458,7 +523,15 @@ export default {
 
       for (const action of ["morning", "evening"]) {
         if (!inDispatchWindow(parts, action)) continue;
-        await dispatchScheduledOnce(env, client, date, action);
+
+        try {
+          await dispatchScheduledOnce(env, client, date, action);
+        } catch (error) {
+          console.error(
+            `Scheduled dispatch failed for ${client.id} ${date} ${action}`,
+            String(error?.message || error).slice(0, 500)
+          );
+        }
       }
     }
   },
@@ -481,6 +554,7 @@ export default {
         statusWorkflow: STATUS_WORKFLOW,
         retries: "3-cycles-x-5-inside-single-github-run",
         retryIntervalMinutes: 3,
+        nonWorkingDays: "D1:non_working_days",
       });
     }
 
