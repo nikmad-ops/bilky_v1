@@ -1,7 +1,7 @@
 const CLIENTS = [
   { id: "nik", name: "Nik", repo: "nikmad-ops/bilky_v1", scheduled: false },
   { id: "alena", name: "Alena", repo: "nikmad-ops/bilky_client_01", scheduled: false },
-  { id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: true },
+  { id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: false },
 ];
 
 const TELEGRAM_API = "https://api.telegram.org";
@@ -242,7 +242,7 @@ async function callV41(env,path,payload) {
 }
 
 async function dispatchStatus(env,client,chatId,requestId,role="admin",recipient="admin") {
-  if (client.id==="nik" || client.id==="alena") {
+  if (client.id==="nik" || client.id==="alena" || client.id==="irakli") {
     return callV41(env,"/internal/status",{
       role,
       client_id:client.id,
@@ -293,7 +293,7 @@ async function handleAdminCallback(env,cb) {
   if (data.startsWith("run-action:")) {
     const [,id,action]=data.split(":");
 
-    if (id==="nik" || id==="alena") {
+    if (id==="nik" || id==="alena" || id==="irakli") {
       try {
         const r=await callV41(env,"/internal/manual",{
           role:"admin",
@@ -356,11 +356,11 @@ async function handleAlenaCallback(env,cb) {
     const [, id, action]=data.split(":");
     if (!["alena","irakli"].includes(id)) return;
 
-    if (id==="alena") {
+    if (id==="alena" || id==="irakli") {
       try {
         const r=await callV41(env,"/internal/manual",{
           role:"alena",
-          client_id:"alena",
+          client_id:id,
           action,
           request_id:String(cb.id)
         });
@@ -369,22 +369,15 @@ async function handleAlenaCallback(env,cb) {
           return send(
             env.ALENA_TELEGRAM_BOT_TOKEN,
             chat,
-            `Bilky for Alena: ${r.date} is a non-working day${r.reason ? ` (${r.reason})` : ""}. Run is blocked.`
+            `Bilky for ${clientById(id).name}: ${r.date} is a non-working day${r.reason ? ` (${r.reason})` : ""}. Run is blocked.`
           );
         }
         const label=action==="morning"?"Morning":"Evening";
-        return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,`Bilky for Alena: ${label} started. Automatic recovery is enabled (up to 15 attempts).`);
+        return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,`Bilky for ${clientById(id).name}: ${label} started. Automatic recovery is enabled (up to 15 attempts).`);
       } catch(e) {
-        return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,`Bilky for Alena: could not start the run. ${e.message}`);
+        return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,`Bilky for ${clientById(id).name}: could not start the run. ${e.message}`);
       }
     }
-
-    const r=await startManual(env,"alena",id,action);
-    if (r.weekend) return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,"Сегодня выходной. Запуск недоступен.");
-    if (r.alreadyRunning) return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,"Такой ручной запуск уже выполняется.");
-    if (!r.ok) return send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,"Не удалось создать ручной запуск.");
-    const label=action==="morning"?"утро":"вечер";
-    await send(env.ALENA_TELEGRAM_BOT_TOKEN,chat,`Запуск: ${r.client.name}, ${label}. До 5 попыток. Автоповторы включены.`);
   }
 }
 
