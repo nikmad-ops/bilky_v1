@@ -5,6 +5,7 @@ const config = JSON.parse(fs.readFileSync("config/clients.v4.1.json", "utf8"));
 const workflow = fs.readFileSync(".github/workflows/workshift-v4.1-master.yml", "utf8");
 const statusWorkflow = fs.readFileSync(".github/workflows/status-v4.1.yml", "utf8");
 const controlPlane = fs.readFileSync("cloudflare/bilky-v4.1-control-plane.js", "utf8");
+const alenaBridge = fs.readFileSync("cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js", "utf8");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -83,6 +84,29 @@ for (const required of [
 ]) {
   assert(statusWorkflow.includes(required), `Missing v4.1 status invariant: ${required}`);
 }
+
+for (const required of [
+  '{ id: "alena", name: "Alena", repo: "nikmad-ops/bilky_client_01", scheduled: false }',
+  '{ id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: true }',
+  'if (client.id==="nik" || client.id==="alena")',
+  'role:"alena"',
+  'client_id:"alena"',
+  'recipient:"client"',
+  'if (id==="nik" || id==="alena")',
+  'if (id==="alena")',
+  'const r=await startManual(env,"alena",id,action)',
+]) {
+  assert(alenaBridge.includes(required), `Missing Alena migration bridge invariant: ${required}`);
+}
+
+assert(
+  alenaBridge.includes('dispatchStatus(env,c,chat,msg.message_id,"alena","client")'),
+  "Alena Status must stay self-only and use client recipient"
+);
+assert(
+  alenaBridge.includes('targetKeyboard(["alena","irakli"],"alena-run-target")'),
+  "Alena Run must retain Alena/Irakli target selection"
+);
 
 console.log("v4.1 static architecture checks passed");
 
