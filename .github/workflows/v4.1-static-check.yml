@@ -13,6 +13,8 @@ on:
       - '.github/workflows/status-v4.1.yml'
       - 'cloudflare/bilky-v4.1-control-plane.js'
       - 'cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js'
+      - 'scripts/v4.1-non-working-days-test.mjs'
+      - 'migrations/0001_non_working_days.sql'
       - '.github/workflows/v4.1-static-check.yml'
   workflow_dispatch:
 
@@ -34,6 +36,7 @@ jobs:
           node --check src/workshift.js
           node --check cloudflare/bilky-v4.1-control-plane.js
           node --check cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          node --check scripts/v4.1-non-working-days-test.mjs
 
       - name: Parse workflow YAML
         run: |
@@ -66,3 +69,6 @@ jobs:
           grep -q 'sleep 180' .github/workflows/workshift-v4.1-master.yml
           grep -q 'timeout-minutes: 70' .github/workflows/workshift-v4.1-master.yml
           echo "Bilky v4.1 migration invariants OK"
+
+      - name: Test D1 non-working day behavior offline
+        run: node scripts/v4.1-non-working-days-test.mjs
