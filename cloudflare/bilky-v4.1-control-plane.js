@@ -24,8 +24,8 @@ const CLIENTS = {
   irakli: {
     id: "irakli",
     label: "Irakli",
-    enabled: false,
-    scheduled: false,
+    enabled: true,
+    scheduled: true,
     airtopProfile: "bilky-irakli",
     githubEnvironment: "client-irakli",
   },
