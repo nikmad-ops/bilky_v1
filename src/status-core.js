@@ -44,8 +44,8 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
 
   const airtop = new AirtopClient({ apiKey: airtopApiKey });
 
-  async function openWorkshift(page) {
-    log("STATUS_STAGE=open-workshift");
+  async function openWorkshift(page, markStage) {
+    markStage("open-workshift");
 
     await page.goto(WORKSHIFT_URL, {
       waitUntil: "domcontentloaded",
@@ -53,7 +53,7 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
     });
 
     if (page.url().includes("/auth/login")) {
-      log("STATUS_STAGE=login-form");
+      markStage("login-form");
 
       const taxId = page.locator("#taxid").first();
       const passwordInput = page.locator("#password").first();
@@ -75,7 +75,7 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       const submit = page.locator('button[type="submit"]').first();
       if (!(await submit.count())) throw new Error("Bilky status login button not found");
 
-      log("STATUS_STAGE=submit-login");
+      markStage("submit-login");
 
       await submit.evaluate((el) => {
         const form = el.form;
@@ -107,7 +107,7 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       if (!hasWorkshift && (await link.count())) {
         const href =
           (await link.getAttribute("href").catch(() => null)) || WORKSHIFT_URL;
-        log("STATUS_STAGE=dashboard-workshift");
+        markStage("dashboard-workshift");
         await page.goto(href, {
           waitUntil: "domcontentloaded",
           timeout: 12000,
@@ -120,7 +120,7 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       if (page.url().includes("/employee/hour-registration/hour-registration/show/")) {
         const anyDay = page.locator('[id^="container_"]').first();
         if (await anyDay.count()) {
-          log("STATUS_STAGE=workshift-ready");
+          markStage("workshift-ready");
           return;
         }
       }
@@ -206,7 +206,20 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
   async function run(operation) {
     let sessionId = null;
     let browser = null;
+    let page = null;
+    let sessionReadyAt = 0;
+    let terminalError = null;
+    let currentStage = "session-create";
     const captchaEvents = [];
+    const stageTimeline = [
+      { at: new Date().toISOString(), stage: currentStage },
+    ];
+
+    const markStage = (stage) => {
+      currentStage = stage;
+      stageTimeline.push({ at: new Date().toISOString(), stage });
+      log(`STATUS_STAGE=${stage}`);
+    };
 
     try {
       log("Bilky status: creating Airtop session solveCaptcha=true proxy=ES sticky=true");
@@ -224,7 +237,7 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       sessionId = session.data.id;
       if (!session.data.cdpWsUrl) throw new Error("Airtop status session missing cdpWsUrl");
 
-      const sessionReadyAt = Date.now();
+      sessionReadyAt = Date.now();
       const sessionDeadline = sessionReadyAt + AIRTOP_STATUS_BUDGET_MS;
 
       log(
@@ -258,15 +271,14 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
       const context = browser.contexts()[0];
       if (!context) throw new Error("Airtop status browser context not found");
 
-      const page = context.pages()[0] || (await context.newPage());
+      page = context.pages()[0] || (await context.newPage());
       page.setDefaultTimeout(10000);
       page.setDefaultNavigationTimeout(AIRTOP_STATUS_BUDGET_MS);
 
       const result = await Promise.race([
         (async () => {
-          await openWorkshift(page);
-          const setStage = (stage) => log(`STATUS_STAGE=${stage}`);
-          return operation({ page, setStage });
+          await openWorkshift(page, markStage);
+          return operation({ page, setStage: markStage });
         })(),
         new Promise((_, reject) => {
           setTimeout(
@@ -281,16 +293,62 @@ export function createStatusCore({ nif, password, airtopApiKey, diagnosticsDir =
         }),
       ]);
 
-      if (captchaEvents.length) {
+      return result;
+    } catch (error) {
+      terminalError = String(
+        error?.cause?.message || error?.message || error || "Unknown error"
+      )
+        .split("\n")[0]
+        .slice(0, 500);
+      throw error;
+    } finally {
+      try {
+        if (captchaEvents.length) {
+          fs.writeFileSync(
+            `${diagnosticsDir}/status-captcha-events.json`,
+            JSON.stringify(captchaEvents, null, 2),
+            "utf8"
+          );
+        }
+
         fs.writeFileSync(
-          `${diagnosticsDir}/status-captcha-events.json`,
-          JSON.stringify(captchaEvents, null, 2),
+          `${diagnosticsDir}/status-stage-timeline.json`,
+          JSON.stringify(stageTimeline, null, 2),
           "utf8"
+        );
+
+        fs.writeFileSync(
+          `${diagnosticsDir}/status-session-summary.json`,
+          JSON.stringify(
+            {
+              capturedAt: new Date().toISOString(),
+              sessionId,
+              profile: AIRTOP_PROFILE_NAME,
+              budgetMs: AIRTOP_STATUS_BUDGET_MS,
+              sessionReadyAt:
+                sessionReadyAt > 0
+                  ? new Date(sessionReadyAt).toISOString()
+                  : null,
+              currentStage,
+              terminalError,
+              captchaEventCount: captchaEvents.length,
+              captchaEvents,
+            },
+            null,
+            2
+          ),
+          "utf8"
+        );
+      } catch (diagnosticError) {
+        log(
+          `Status diagnostic persistence warning: ${String(
+            diagnosticError?.message || diagnosticError
+          )
+            .split("\n")[0]
+            .slice(0, 180)}`
         );
       }
 
-      return result;
-    } finally {
       const activeSessionId = sessionId;
 
       if (activeSessionId) {
