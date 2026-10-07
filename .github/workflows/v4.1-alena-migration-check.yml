@@ -1,0 +1,52 @@
+name: Bilky v4.1 Alena Migration Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/v4.1-alena-migration-check.yml'
+      - 'config/clients.v4.1.json'
+      - 'cloudflare/bilky-v4.1-control-plane-alena-enabled.js'
+      - 'cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js'
+      - '.github/workflows/workshift-v4.1-master.yml'
+      - '.github/workflows/status-v4.1.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax
+        run: |
+          node --check cloudflare/bilky-v4.1-control-plane-alena-enabled.js
+          node --check cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/workshift-v4.1-master.yml"); YAML.load_file(".github/workflows/status-v4.1.yml"); puts "YAML parse OK"'
+
+      - name: Invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require("fs");
+          const c=JSON.parse(fs.readFileSync("config/clients.v4.1.json","utf8"));
+          if (!c.clients.nik.enabled || !c.clients.nik.scheduled) throw new Error("Nik disabled");
+          if (!c.clients.alena.enabled || !c.clients.alena.scheduled) throw new Error("Alena disabled");
+          if (c.clients.irakli.enabled || c.clients.irakli.scheduled) throw new Error("Irakli unexpectedly enabled");
+          if (c.recovery.cycles!==3 || c.recovery.attemptsPerCycle!==5 || c.recovery.retryMinutes!==3) throw new Error("Recovery invariant changed");
+          if (c.recovery.airtopSessionBudgetMs!==28000) throw new Error("Airtop budget changed");
+          NODE
+          grep -q 'githubEnvironment: "client-alena"' cloudflare/bilky-v4.1-control-plane-alena-enabled.js
+          grep -q 'airtopProfile: "bilky-alena"' cloudflare/bilky-v4.1-control-plane-alena-enabled.js
+          grep -q 'scheduled: false' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q 'bilky_client_02", scheduled: true' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q 'for CYCLE in 1 2 3' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'for LOCAL_ATTEMPT in 1 2 3 4 5' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'sleep 180' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'timeout-minutes: 70' .github/workflows/workshift-v4.1-master.yml
+          echo "Alena migration invariants OK"
