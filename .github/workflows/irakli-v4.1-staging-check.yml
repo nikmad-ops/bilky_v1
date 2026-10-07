@@ -1,0 +1,38 @@
+name: Irakli v4.1 Staging Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/irakli-v4.1-staging-check.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax
+        run: |
+          node --check cloudflare/bilky-v4.1-control-plane-irakli-enabled.js
+          node --check cloudflare/bilky-clients-scheduler-all-v4.1-bridge.js
+
+      - name: Cutover invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'id: "irakli"' cloudflare/bilky-v4.1-control-plane-irakli-enabled.js
+          grep -q 'label: "Irakli"' cloudflare/bilky-v4.1-control-plane-irakli-enabled.js
+          grep -q 'enabled: true' cloudflare/bilky-v4.1-control-plane-irakli-enabled.js
+          grep -q 'githubEnvironment: "client-irakli"' cloudflare/bilky-v4.1-control-plane-irakli-enabled.js
+          grep -q 'airtopProfile: "bilky-irakli"' cloudflare/bilky-v4.1-control-plane-irakli-enabled.js
+          grep -q '{ id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: false }' cloudflare/bilky-clients-scheduler-all-v4.1-bridge.js
+          grep -q 'client.id==="nik" || client.id==="alena" || client.id==="irakli"' cloudflare/bilky-clients-scheduler-all-v4.1-bridge.js
+          grep -q 'id==="nik" || id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-all-v4.1-bridge.js
+          grep -q 'id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-all-v4.1-bridge.js
+          echo "Irakli v4.1 staging checks passed"
