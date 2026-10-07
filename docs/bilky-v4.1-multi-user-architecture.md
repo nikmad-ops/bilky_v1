@@ -2,6 +2,7 @@
 
 **Статус:** Target architecture / рабочее ТЗ  
 **Версия:** 4.1  
+**Последнее обновление:** 08.10.2026 — operational calendar / Cloudflare D1  
 **Язык документа:** русский  
 **Исходный репозиторий:** `nikmad-ops/bilky_v1`  
 **Назначение:** описание целевой multi-user архитектуры Bilky Automation простым языком, чтобы новый участник команды, включая стажёра без опыта DevOps, мог понять систему, безопасно работать с ней и развивать её.
@@ -205,6 +206,29 @@ Cloudflare Key-Value storage.
 
 **В нашем случае:** лёгкая память Control Plane: idempotency, состояние dispatch, request IDs и временные operational states.
 
+**Важно:** KV не является календарём. Даты праздников/day off в KV не хранятся.
+
+### D1
+Cloudflare D1 — реляционная SQL-база данных Cloudflare.
+
+**В нашем случае:** D1 `bilky-app` хранит operational calendar, то есть явные non-working dates по пользователям. Используется таблица `non_working_days`.
+
+D1 и KV имеют разные роли:
+
+- **D1** — business configuration: какие конкретные даты являются нерабочими для конкретного пользователя;
+- **KV** — transient/control state: был ли dispatch, request ID, idempotency и временное состояние.
+
+### Non-working day
+Явно заданная нерабочая дата конкретного пользователя: официальный праздник, day off или другая дата, когда Bilky Morning/Evening запускать нельзя.
+
+Ключевые правила:
+
+- дата хранится как данные, а не в коде;
+- запись относится к конкретному `user_id`;
+- один пользователь может иметь выходной, а другой в ту же дату работать;
+- календарь управляется администратором через D1 без изменения JavaScript/YAML и без redeploy;
+- weekend остаётся отдельным общим правилом и не требует записей на каждую субботу/воскресенье.
+
 ### Secret
 Конфиденциальное значение: пароль, NIF, API key, Telegram bot token, GitHub token.
 
@@ -242,29 +266,34 @@ Cloudflare Key-Value storage.
 
 ## 3. Bilky за 60 секунд: что происходит в обычный день
 
-Пример Morning для Nik.
+Пример Morning для Nik в рабочий день.
 
 1. Cloudflare Worker по расписанию видит, что наступило время Morning.
-2. Worker проверяет, не создавался ли уже Morning job для Nik сегодня.
-3. Если нет — Worker запускает GitHub workflow.
-4. GitHub получает параметры: пользователь, Morning/Evening, Airtop profile, режим запуска.
-5. GitHub создаёт Airtop browser session.
-6. Airtop открывает Bilky через ES proxy.
-7. Код проверяет: пользователь уже на Workshift, на Dashboard или на Login.
-8. Если Bilky просит login — вводятся NIF и password.
-9. После login система определяет Dashboard по URL и DOM.
-10. Открывается Workshift.
-11. Перед нажатием Clock проверяется, нет ли уже фактического времени.
-12. Если факт уже есть — ничего не нажимаем и завершаем job как `already_done`.
-13. Если факта нет — нажимаем Clock.
-14. Ждём ответ Bilky.
-15. При HTTP 200 читаем фактическое время.
-16. GitHub отправляет Telegram success.
-17. Job завершён.
+2. Worker определяет локальную дату `Europe/Madrid` и проверяет, что сегодня weekday.
+3. До любого GitHub/Airtop dispatch Worker проверяет D1 `bilky-app.non_working_days` для пары `Nik + дата`.
+4. Если запись существует, день считается non-working: Scheduled Morning/Evening не создаётся, GitHub Actions и Airtop вообще не запускаются.
+5. Если дата рабочая, Worker проверяет KV idempotency: не создавался ли уже Morning job для Nik сегодня.
+6. Если нет — Worker запускает GitHub workflow.
+7. GitHub получает параметры: пользователь, Morning/Evening, Airtop profile, режим запуска.
+8. GitHub создаёт Airtop browser session.
+9. Airtop открывает Bilky через ES proxy.
+10. Код проверяет: пользователь уже на Workshift, на Dashboard или на Login.
+11. Если Bilky просит login — вводятся NIF и password.
+12. После login система определяет Dashboard по URL и DOM.
+13. Открывается Workshift.
+14. Перед нажатием Clock проверяется, нет ли уже фактического времени.
+15. Если факт уже есть — ничего не нажимаем и завершаем job как `already_done`.
+16. Если факта нет — нажимаем Clock.
+17. Ждём ответ Bilky.
+18. При HTTP 200 читаем фактическое время.
+19. GitHub отправляет Telegram success.
+20. Job завершён.
 
-Если попытка неуспешна, запускается recovery: новая Airtop session через 3 минуты.
+Если browser attempt неуспешен, запускается recovery: новая Airtop session через 3 минуты.
 
----
+Calendar check относится к **созданию job**, а не к recovery уже запущенного job. Уже начатый допустимый job продолжает recovery по своим правилам.
+
+Status — отдельный read-only сценарий: он разрешён и в non-working day, получает календарь из D1 и показывает такой день как non-working.
 
 ## 4. Цели v4.1 Multi-user
 
@@ -283,7 +312,8 @@ Nik, Alena, Irakli и будущие пользователи должны ис�
 - Airtop profile;
 - Telegram routing;
 - state и idempotency keys;
-- run history.
+- run history;
+- operational non-working calendar entries.
 
 ### 4.3 Автоматическое восстановление
 Один временный сбой не должен превращаться в пользовательское `ERROR`.
@@ -310,7 +340,8 @@ v4.1 должна самостоятельно пройти до 3 cycles × 5 a
 flowchart LR
     TG[Telegram] --> CF[Cloudflare Control Plane]
     CRON[Cloudflare Cron] --> CF
-    CF --> KV[Cloudflare KV]
+    CF <--> KV[Cloudflare KV]
+    CF <--> D1[(Cloudflare D1<br/>bilky-app / non_working_days)]
     CF --> GH[GitHub Actions<br/>bilky_v1]
     GH --> AT[Airtop Browser]
     AT --> BK[Bilky]
@@ -320,32 +351,34 @@ flowchart LR
 
 Простыми словами:
 
-- **Cloudflare** решает, когда и кого запускать.
+- **Cloudflare Control Plane** решает, когда и кого запускать.
+- **D1** хранит явные per-user non-working dates и проверяется до создания Morning/Evening job.
+- **KV** хранит idempotency и временный dispatch state; календарь в KV не хранится.
 - **GitHub Actions** выполняет бизнес-задачу и владеет recovery.
 - **Airtop** предоставляет браузер.
-- **Bilky** является системой назначения.
-- **KV** не даёт запускать одно и то же повторно.
+- **Bilky** является системой назначения и source of truth для фактического времени.
 - **Telegram** — интерфейс пользователя и администратора.
 - **Artifacts** — техническая история и диагностика.
 
----
+Главное разделение ответственности:
+
+> D1 отвечает на вопрос «можно ли вообще запускать этого пользователя в эту дату?». KV отвечает на вопрос «не запускали ли мы уже эту операцию?».
 
 ## 6. Компоненты и ответственность
 
 | Компонент | Продукт | Что делает | Чего делать не должен |
 |---|---|---|---|
-| Control Plane | Cloudflare Worker | Scheduler, Manual Run, Status dispatch, permissions, idempotency | Не должен сам управлять браузером Bilky |
-| Scheduler | Cloudflare Cron | Периодически проверяет, пора ли запускать job | Не должен делать retries отдельных browser attempts |
-| State | Cloudflare KV | Хранит dispatch/idempotency/temporary state | Не хранит Bilky password |
+| Control Plane | Cloudflare Worker | Scheduler, Manual Run, Status dispatch, permissions, calendar check, idempotency | Не должен сам управлять браузером Bilky |
+| Scheduler | Cloudflare Cron | Периодически проверяет weekday, operational window и создаёт допустимый job | Не должен делать retries отдельных browser attempts |
+| Operational Calendar | Cloudflare D1 | Хранит явные per-user non-working dates и reason | Не хранит credentials, retry state или browser state |
+| State | Cloudflare KV | Хранит dispatch/idempotency/temporary state | Не хранит Bilky password и не используется как календарь |
 | Execution Engine | GitHub Actions | Выполняет один Morning/Evening job целиком | Не создаёт второй независимый job для того же действия |
-| Browser Core | Node.js + Playwright | Login, DOM, Workshift, Clock, fact | Не решает расписание |
+| Browser Core | Node.js + Playwright | Login, DOM, Workshift, Clock, fact | Не решает расписание и календарь |
 | Browser Provider | Airtop | Создаёт remote browser + ES proxy | Не определяет бизнес-успех |
-| Target System | Bilky | Хранит реальный факт рабочего времени | Не является нашим state store |
+| Target System | Bilky | Хранит реальный факт рабочего времени | Не является нашим control-state store |
 | Notifications | Telegram | User/admin interface | Не определяет успешность Bilky |
 | Diagnostics | GitHub Artifacts | Логи, attempts, forensic | Не должны содержать secrets |
-| Secrets | GitHub Environments / Cloudflare Secrets | Credentials и API keys | Не должны попадать в KV или repo |
-
----
+| Secrets | GitHub Environments / Cloudflare Secrets | Credentials и API keys | Не должны попадать в KV, D1 calendar или repo |
 
 ## 7. Графическая схема v4.1 Multi-user
 
@@ -361,13 +394,14 @@ flowchart TB
       CP[Bilky v4.1 Control Plane]
       REG[Client Registry<br/>non-secret metadata]
       KV[(KV State)]
+      D1[(D1 bilky-app<br/>non_working_days)]
       CRON[Cron]
     end
 
     subgraph GH["GitHub: nikmad-ops/bilky_v1"]
       WF[workshift-v4.1-master.yml]
       CORE[production-core.js]
-      STATUS[status-report.yml]
+      STATUS[status-v4.1.yml]
       ART[(Artifacts)]
       ENVN[Environment client-nik]
       ENVA[Environment client-alena]
@@ -387,25 +421,41 @@ flowchart TB
     ALENA --> CP
     CP --> REG
     CP <--> KV
+    CP <--> D1
     CP --> WF
     CP --> STATUS
 
     ENVN --> WF
     ENVA --> WF
     ENVI --> WF
+    ENVN --> STATUS
+    ENVA --> STATUS
+    ENVI --> STATUS
+
     WF --> CORE
     CORE --> PN
     CORE --> PA
     CORE --> PI
+    STATUS --> PN
+    STATUS --> PA
+    STATUS --> PI
+
     PN --> BK
     PA --> BK
     PI --> BK
+
     WF --> ART
     WF --> ADMIN
     WF --> ALENA
+    STATUS --> ADMIN
+    STATUS --> ALENA
 ```
 
----
+Calendar data проходит только через Control Plane:
+
+- Scheduled/Manual получают бинарное решение **working / non-working** до dispatch;
+- Status получает из Control Plane JSON-массив non-working dates пользователя;
+- GitHub workflow не запрашивает D1 напрямую.
 
 ## 8. Основные сценарии
 
@@ -414,28 +464,45 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     participant C as Cloudflare
+    participant D as D1 Calendar
     participant K as KV
     participant G as GitHub v4.1
     participant A as Airtop
     participant B as Bilky
     participant T as Telegram
 
-    C->>K: Check idempotency
-    K-->>C: Not dispatched
-    C->>G: Start one logical shift job
-    C->>K: Save dispatch state
-    G->>A: Create browser session
-    A->>B: Open Bilky
-    B-->>A: Login / Dashboard / Workshift
-    A->>B: Check existing fact
-    alt Fact exists
-        B-->>G: already_done
-    else No fact
-        A->>B: Click Clock
-        B-->>G: HTTP 200 + fact
+    C->>D: Check client + Madrid date
+    alt Non-working day
+        D-->>C: date + reason
+        C-->>C: Skip dispatch
+    else Working day
+        D-->>C: no record
+        C->>K: Check idempotency
+        K-->>C: Not dispatched
+        C->>G: Start one logical shift job
+        C->>K: Save dispatch state
+        G->>A: Create browser session
+        A->>B: Open Bilky
+        B-->>A: Login / Dashboard / Workshift
+        A->>B: Check existing fact
+        alt Fact exists
+            B-->>G: already_done
+        else No fact
+            A->>B: Click Clock
+            B-->>G: HTTP 200 + fact
+        end
+        G->>T: Success notification
     end
-    G->>T: Success notification
 ```
+
+Порядок проверок принципиален:
+
+1. weekday / operational eligibility;
+2. D1 non-working day;
+3. KV idempotency;
+4. только после этого GitHub/Airtop dispatch.
+
+Если D1 говорит, что дата нерабочая, это нормальный **skip**, а не ошибка и не `ALREADY_DONE`. GitHub run и Airtop session не создаются.
 
 ### 8.2 Manual Run
 
@@ -446,6 +513,9 @@ Manual Run выполняет ту же production-логику, что schedule
 - пользователь сам инициирует запуск через Telegram;
 - обычное scheduled start window не блокирует manual run;
 - weekend block остаётся;
+- перед dispatch выполняется тот же D1 calendar check;
+- если дата есть в `non_working_days`, Run блокируется и Telegram сообщает дату/reason;
+- при calendar block GitHub/Airtop не запускаются;
 - duplicate protection и recovery такие же;
 - максимум 3 cycles × 5 attempts.
 
@@ -454,22 +524,108 @@ Manual Run выполняет ту же production-логику, что schedule
 - **Nik/admin** — может запустить любого пользователя;
 - **Alena** — может запустить Alena и Irakli;
 - будущий обычный пользователь — только самого себя;
-- Irakli прямой Telegram interface не получает.
+- Irakli прямой Telegram interface сейчас не получает.
 
 ### 8.3 Status
 
-Status — отдельная операция.
+Status — отдельная read-only операция.
 
 Правила:
 
 - Status не берётся из cache;
-- Status запускает реальную read-only проверку Bilky;
-- для Status может использоваться Airtop;
+- Status разрешён в working и non-working days;
+- перед dispatch Control Plane читает из D1 полный список non-working dates выбранного пользователя;
+- список передаётся в `status-v4.1.yml` как `non_working_days_json`;
+- Status запускает реальную read-only проверку Bilky через Airtop;
 - Status не нажимает Clock;
-- результат возвращается в Telegram;
+- обычная строка non-working day отображается как `🏖 DD.MM: <reason>`;
+- если на non-working date в Bilky неожиданно уже есть Morning/Evening fact, Status показывает warning `⚠️`, но ничего не исправляет автоматически;
 - Status не должен менять Morning/Evening state.
 
----
+### 8.4 Operational calendar / non-working days
+
+#### Source of truth
+
+Cloudflare D1 database:
+
+- database: `bilky-app`;
+- Worker binding: `BILKY_DB`;
+- table: `non_working_days`.
+
+Schema:
+
+```sql
+CREATE TABLE IF NOT EXISTS non_working_days (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  date TEXT NOT NULL,
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, date)
+);
+```
+
+Смысл полей:
+
+- `user_id` — стабильный client ID из Client Registry, например `nik`, `alena`, `irakli`;
+- `date` — локальная календарная дата в формате `YYYY-MM-DD`, применяемая по `Europe/Madrid`;
+- `reason` — человекочитаемая причина для Status/Telegram;
+- `created_at` — audit timestamp создания записи;
+- `UNIQUE(user_id, date)` — не позволяет создать две разные записи одному пользователю на одну дату.
+
+#### Текущие production records
+
+На 08.10.2026 заведены шесть записей:
+
+- Nik, Alena, Irakli — `2026-10-09`: **Valencian Community Day**;
+- Nik, Alena, Irakli — `2026-10-12`: **National Day of Spain**.
+
+Это не «общие праздники системы». Это шесть явных per-user записей. Если у будущего пользователя 09.10 рабочий день, для него просто не создаётся запись на эту дату.
+
+#### Администрирование
+
+Праздники и day off добавляет/изменяет/удаляет администратор как данные D1.
+
+Для обычного изменения календаря:
+
+- не редактируем JavaScript;
+- не редактируем YAML;
+- не добавляем даты в Client Registry;
+- не используем KV;
+- не нужен deploy Worker.
+
+Примеры операций:
+
+```sql
+-- Добавить или обновить non-working day
+INSERT INTO non_working_days (user_id, date, reason)
+VALUES ('nik', '2026-10-09', 'Valencian Community Day')
+ON CONFLICT(user_id, date)
+DO UPDATE SET reason = excluded.reason;
+
+-- Удалить ошибочно внесённую дату
+DELETE FROM non_working_days
+WHERE user_id = 'nik' AND date = '2026-10-09';
+
+-- Посмотреть календарь пользователя
+SELECT user_id, date, reason, created_at
+FROM non_working_days
+WHERE user_id = 'nik'
+ORDER BY date;
+```
+
+Автоматический импорт государственных/региональных праздников в v4.1 **не используется**. Календарь намеренно явный и управляется вручную.
+
+#### Failure policy
+
+Calendar является pre-execution safety gate.
+
+Если `BILKY_DB` отсутствует или D1 query падает, Control Plane не должен «предположить, что день рабочий» и запустить Clock. Текущее безопасное поведение — **fail closed**:
+
+- Scheduled Morning/Evening не dispatchится;
+- Manual Run возвращает техническую ошибку вместо запуска;
+- Status также не угадывает календарь, а завершается ошибкой запроса;
+- admin должен сначала восстановить D1/binding.
 
 ## 9. Recovery: три цикла по пять попыток
 
@@ -773,7 +929,9 @@ Diagnostics нужны не «на всякий случай», а чтобы с
 
 | Информация | Владелец |
 |---|---|
-| Расписание | Cloudflare Control Plane |
+| Расписание и operational windows | Cloudflare Control Plane |
+| Weekday/weekend rule | Cloudflare Control Plane |
+| Явные per-user non-working dates | Cloudflare D1 `bilky-app.non_working_days` |
 | Список пользователей, labels, profile names, permissions | Client Registry |
 | Dispatch idempotency | Cloudflare KV |
 | Один активный Morning/Evening job | GitHub Actions |
@@ -788,9 +946,11 @@ Diagnostics нужны не «на всякий случай», а чтобы с
 
 > одна сущность должна иметь одного понятного владельца.
 
-Например, retries принадлежат GitHub job. Cloudflare не должен параллельно создавать свои retries того же attempt.
+Например:
 
----
+- retries принадлежат GitHub job; Cloudflare не должен параллельно создавать свои retries того же attempt;
+- non-working dates принадлежат D1; их нельзя дублировать в коде, KV или нескольких конфигурационных файлах;
+- факт Morning/Evening принадлежит Bilky; D1 не хранит «как будто факт», а только разрешение/запрет запуска на дату.
 
 ## 16. Multi-user model
 
@@ -809,7 +969,7 @@ Diagnostics нужны не «на всякий случай», а чтобы с
 }
 ```
 
-Secrets в такой record не входят.
+Secrets и список non-working dates в такой record не входят.
 
 ### 16.1 Минимальный набор полей
 
@@ -831,7 +991,20 @@ Concurrency key:
 
 Это не даёт запустить два Morning одновременно для одного пользователя, но не мешает разным пользователям.
 
----
+### 16.3 Независимость календарей
+
+Operational calendar тоже изолирован per user.
+
+Ключ записи:
+
+`user_id + date`
+
+Поэтому:
+
+- одинаковый праздник можно добавить нескольким пользователям отдельными rows;
+- day off одного пользователя не влияет на других;
+- удаление/изменение даты одного пользователя не меняет Client Registry и не требует deployment;
+- при добавлении нового пользователя не нужно менять calendar code — достаточно использовать его стабильный `user_id` в D1.
 
 ## 17. Telegram routing и permissions
 
@@ -1014,6 +1187,18 @@ Airtop — наиболее заметный переменный расход.
 
 **Действие:** user soft message + admin requires attention. Job terminal.
 
+### 20.10 D1 / BILKY_DB недоступен
+
+**Что означает:** Control Plane не может доказать, что выбранная дата является рабочей.
+
+**Действие:** fail closed. Не создавать Morning/Evening GitHub/Airtop job. Проверить D1 database `bilky-app`, binding `BILKY_DB` и query. Не обходить calendar check временным hardcode.
+
+### 20.11 На non-working day в Bilky уже есть факт
+
+**Что означает:** calendar говорит «нерабочий день», но Bilky содержит Morning и/или Evening.
+
+**Действие:** Status показывает warning. Автоматически удалять/исправлять факт нельзя. Сначала определить, ошибочна ли запись D1 или факт Bilky.
+
 ---
 
 ## 21. Runbook: что делать при проблеме
@@ -1046,6 +1231,21 @@ Airtop — наиболее заметный переменный расход.
 Считать Bilky action успешным.
 
 Нельзя делать повторный click из-за проблем с Telegram, parsing или artifact upload.
+
+### Ситуация E: Scheduled job не стартовал в будний день
+
+1. проверить дату в `bilky-app.non_working_days` для конкретного `user_id`;
+2. если запись ожидаемая — это нормальный calendar skip, GitHub/Airtop run быть не должно;
+3. если запись ошибочная — исправить/удалить её в D1;
+4. только после исправления, если бизнес-действие действительно нужно, использовать Manual Run;
+5. не добавлять временный обход calendar gate в код.
+
+### Ситуация F: нужно добавить праздник или day off
+
+1. определить пользователя и локальную дату `Europe/Madrid`;
+2. добавить/обновить row в D1 `non_working_days`;
+3. проверить `SELECT`, что `user_id/date/reason` записаны правильно;
+4. код, KV, GitHub workflow и Airtop не трогать.
 
 ---
 
@@ -1106,6 +1306,8 @@ session budget exceeded
 10. Не считать Telegram failure бизнес-ошибкой Bilky.
 11. Не мигрировать всех пользователей одновременно после непроверенного изменения.
 12. Не добавлять новые архитектурные механизмы без ADR, если они меняют ownership/state/retry/security.
+13. Не прописывать праздники/day off в JavaScript, YAML, Client Registry или KV — source of truth только D1.
+14. Не обходить calendar check и не считать день рабочим, если D1 недоступен.
 
 ---
 
@@ -1118,6 +1320,7 @@ session budget exceeded
 Пример:
 
 - schedule → Cloudflare;
+- operational calendar / non-working dates → Cloudflare D1;
 - retry → GitHub workflow;
 - login/DOM → production-core;
 - notification → workflow/Telegram layer;
@@ -1130,6 +1333,8 @@ session budget exceeded
 ### Шаг 3. Изменить минимальную область
 
 Не переписывать несколько компонентов, если проблема локальная.
+
+Добавление/изменение обычного праздника или day off — это **data change в D1**, а не code change. Код меняется только если меняются schema или правила поведения календаря.
 
 ### Шаг 4. Static validation
 
@@ -1217,6 +1422,16 @@ Nik остаётся pilot user для новых архитектурных и�
 
 **Решение:** `bilky_v1` — source of truth; credentials через отдельные GitHub Environments.
 
+### ADR-011 — Operational calendar хранится в D1 как per-user data
+
+**Решение:** explicit non-working dates хранятся в Cloudflare D1 `bilky-app.non_working_days`. Даты не hardcodeятся и не хранятся в KV.
+
+**Почему:** календарь — изменяемая business configuration. Администратор должен иметь возможность добавить праздник/day off без изменения кода и redeploy.
+
+**Execution rule:** Scheduled и Manual Run проверяют D1 до GitHub/Airtop dispatch. Status использует те же данные для отображения.
+
+**Failure rule:** при недоступности D1 Clock dispatch fail-closed — система не предполагает, что день рабочий.
+
 ---
 
 ## 26. Масштабирование и roadmap
@@ -1227,9 +1442,10 @@ Nik остаётся pilot user для новых архитектурных и�
 
 - один Control Plane;
 - один master repo;
-- один workflow;
+- один master workshift workflow;
 - Client Registry;
 - KV state;
+- одна D1 database `bilky-app` с per-user calendar rows;
 - отдельные GitHub Environments;
 - отдельные Airtop profiles/API keys.
 
@@ -1241,7 +1457,10 @@ Nik остаётся pilot user для новых архитектурных и�
 - dashboard metrics по success rate / attempts / Airtop usage;
 - более строгий observability;
 - автоматический reporting по repeated failures;
+- удобный admin-интерфейс/операционная процедура для D1 calendar management;
 - stagger scheduled starts, если нагрузка начинает конфликтовать.
+
+Принцип calendar storage не меняется: одна таблица, явный `user_id + date`.
 
 ### 26.3 100+ пользователей
 
@@ -1249,6 +1468,7 @@ v4.1 должна позволить расти без изменения осн
 
 - один logical job;
 - per-user isolation;
+- per-user operational calendar;
 - retries внутри job;
 - idempotency;
 - secret isolation;
@@ -1272,24 +1492,30 @@ Web UI не входит в v4.1.
 - diagnostics links;
 - Airtop credit statistics;
 - permissions;
-- schedule settings.
+- schedule settings;
+- просмотр и редактирование per-user non-working days в D1.
 
-### 26.5 Обязательные задачи перед миграцией Alena и Irakli на v4.1
+### 26.5 Production status после миграции
 
-1. реализовать 3 cycles × 5 attempts в одном master workflow;
-2. увеличить GitHub job timeout: текущих 35 минут недостаточно для 15 attempts;
-3. реализовать soft Telegram notifications на границах cycles;
-4. расширить operational Morning/Evening windows;
-5. гарантировать, что end-of-window не останавливает уже начатый recovery;
-6. harden forensic и убрать потенциально чувствительные данные;
-7. создать per-user GitHub Environments;
-8. сделать Client Registry multi-user;
-9. проверить permissions/routing;
-10. провести Nik pilot на реальных Morning/Evening;
-11. после стабильного Nik — мигрировать Alena;
-12. после Alena — Irakli.
+По состоянию на 08.10.2026:
 
----
+- Nik, Alena и Irakli переведены на общий v4.1 Control Plane;
+- для всех трёх используется общий GitHub execution layer;
+- legacy scheduled dispatch для всех трёх отключён;
+- per-user GitHub Environments и Airtop profiles используются в общей архитектуре;
+- D1 operational calendar подключён к Control Plane;
+- 09.10.2026 и 12.10.2026 заведены как non-working days для Nik, Alena и Irakli.
+
+Старая формулировка «обязательные задачи перед миграцией Alena и Irakli» больше не является актуальным gate.
+
+Текущие operational priorities:
+
+1. наблюдать реальные Scheduled Morning/Evening всех трёх пользователей;
+2. сохранять recovery ownership внутри одного v4.1 job;
+3. продолжить forensic hardening, чтобы artifacts гарантированно не содержали чувствительные данные;
+4. поддерживать D1 calendar актуальным до наступления праздников/day off;
+5. отслеживать attempts и Airtop usage на реальных данных;
+6. новых пользователей подключать по той же v4.1 модели без отдельной legacy-ветки.
 
 # Приложение A. Целевой lifecycle одного job
 
