@@ -13,6 +13,7 @@ const {
   AIRTOP_API_KEY,
   REQUEST_CHAT_ID,
   TELEGRAM_CHAT_ID,
+  NON_WORKING_DAYS_JSON,
 } = process.env;
 
 for (const [name, value] of Object.entries({
@@ -41,6 +42,39 @@ if (
     "Unauthorized Telegram chat_id"
   );
 }
+
+function parseNonWorkingDays(raw) {
+  let rows = [];
+
+  try {
+    rows = JSON.parse(raw || "[]");
+  } catch {
+    throw new Error("Invalid NON_WORKING_DAYS_JSON");
+  }
+
+  if (!Array.isArray(rows)) {
+    throw new Error("NON_WORKING_DAYS_JSON must be an array");
+  }
+
+  const map = new Map();
+
+  for (const row of rows) {
+    const date = String(row?.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+
+    map.set(
+      date,
+      String(row?.reason || "Non-working day")
+    );
+  }
+
+  return map;
+}
+
+const nonWorkingDays =
+  parseNonWorkingDays(
+    NON_WORKING_DAYS_JSON
+  );
 
 function madridParts(
   date = new Date()
@@ -365,7 +399,8 @@ function classifyDay(
   date,
   state,
   today,
-  nowMinutes
+  nowMinutes,
+  nonWorkingReason
 ) {
   const label =
     dayMonth(
@@ -377,6 +412,39 @@ function classifyDay(
       date,
       today
     );
+
+  if (nonWorkingReason) {
+    const morning =
+      state?.exists
+        ? shortTime(
+            state.morning?.fact
+          )
+        : null;
+
+    const evening =
+      state?.exists
+        ? shortTime(
+            state.evening?.fact
+          )
+        : null;
+
+    if (
+      morning ||
+      evening
+    ) {
+      return {
+        line:
+          `⚠️ ${label}: Non-working day (${nonWorkingReason}) but Bilky has ${morning || "—"}, ${evening || "—"}`,
+        total: 0,
+      };
+    }
+
+    return {
+      line:
+        `🏖 ${label}: ${nonWorkingReason}`,
+      total: 0,
+    };
+  }
 
   if (
     !state.exists
@@ -603,7 +671,10 @@ async function buildStatus({
         date,
         state,
         today,
-        nowMinutes
+        nowMinutes,
+        nonWorkingDays.get(
+          date
+        ) || null
       );
 
     lines.push(
