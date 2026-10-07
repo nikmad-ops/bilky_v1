@@ -1,0 +1,68 @@
+name: Bilky v4.1 Static Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'config/clients.v4.1.json'
+      - 'src/production-core.js'
+      - 'src/status-core.js'
+      - 'src/status.js'
+      - '.github/workflows/workshift-v4.1-master.yml'
+      - '.github/workflows/status-v4.1.yml'
+      - 'cloudflare/bilky-v4.1-control-plane.js'
+      - 'cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js'
+      - '.github/workflows/v4.1-static-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check src/production-core.js
+          node --check src/status-core.js
+          node --check src/status.js
+          node --check src/workshift.js
+          node --check cloudflare/bilky-v4.1-control-plane.js
+          node --check cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+
+      - name: Parse workflow YAML
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/workshift-v4.1-master.yml"); YAML.load_file(".github/workflows/status-v4.1.yml"); YAML.load_file(".github/workflows/v4.1-static-check.yml"); puts "YAML parse OK"'
+
+      - name: Validate migration invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require("fs");
+          const cfg=JSON.parse(fs.readFileSync("config/clients.v4.1.json","utf8"));
+          if (!cfg.clients.nik.enabled || !cfg.clients.nik.scheduled) throw new Error("Nik must stay enabled");
+          if (!cfg.clients.alena.enabled || !cfg.clients.alena.scheduled) throw new Error("Alena must be enabled");
+          if (cfg.clients.irakli.enabled || cfg.clients.irakli.scheduled) throw new Error("Irakli must remain disabled in v4.1");
+          if (cfg.recovery.cycles!==3 || cfg.recovery.attemptsPerCycle!==5) throw new Error("Recovery must remain 3x5");
+          if (cfg.recovery.retryMinutes!==3) throw new Error("Retry delay must remain 3 minutes");
+          if (cfg.recovery.airtopSessionBudgetMs!==28000) throw new Error("Airtop budget must remain 28 seconds");
+          if (cfg.recovery.postLoginStateTimeoutMs!==8000) throw new Error("Post-login timeout must remain 8 seconds");
+          NODE
+
+          grep -q 'githubEnvironment: "client-alena"' cloudflare/bilky-v4.1-control-plane.js
+          grep -q 'airtopProfile: "bilky-alena"' cloudflare/bilky-v4.1-control-plane.js
+          grep -q '{ id: "alena", name: "Alena", repo: "nikmad-ops/bilky_client_01", scheduled: false }' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q '{ id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: true }' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q 'dispatchStatus(env,c,chat,msg.message_id,"alena","client")' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q 'if (id==="alena")' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q 'for CYCLE in 1 2 3' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'for LOCAL_ATTEMPT in 1 2 3 4 5' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'sleep 180' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'timeout-minutes: 70' .github/workflows/workshift-v4.1-master.yml
+          echo "Bilky v4.1 migration invariants OK"
