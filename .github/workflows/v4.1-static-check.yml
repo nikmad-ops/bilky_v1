@@ -13,6 +13,7 @@ on:
       - 'scripts/v4.1-static-check.mjs'
       - 'scripts/v4.1-control-plane-test.mjs'
       - 'cloudflare/bilky-v4.1-control-plane.js'
+      - 'cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js'
       - '.github/workflows/status-v4.1.yml'
       - '.github/workflows/v4.1-static-check.yml'
   workflow_dispatch:
