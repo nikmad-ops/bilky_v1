@@ -12,8 +12,8 @@
     },
     "alena": {
       "label": "Alena",
-      "enabled": false,
-      "scheduled": false,
+      "enabled": true,
+      "scheduled": true,
       "airtopProfile": "bilky-alena",
       "githubEnvironment": "client-alena",
       "telegramRecipientMode": "client-secret"
@@ -29,16 +29,33 @@
   },
   "permissions": {
     "admin": {
-      "runTargets": ["nik", "alena", "irakli"],
-      "statusTargets": ["nik", "alena", "irakli"]
+      "runTargets": [
+        "nik",
+        "alena",
+        "irakli"
+      ],
+      "statusTargets": [
+        "nik",
+        "alena",
+        "irakli"
+      ]
     },
     "alena": {
-      "runTargets": ["alena", "irakli"],
-      "statusTargets": ["alena"]
+      "runTargets": [
+        "alena",
+        "irakli"
+      ],
+      "statusTargets": [
+        "alena"
+      ]
     },
     "default": {
-      "runTargets": ["self"],
-      "statusTargets": ["self"]
+      "runTargets": [
+        "self"
+      ],
+      "statusTargets": [
+        "self"
+      ]
     }
   },
   "windows": {
