@@ -86,7 +86,17 @@ try {
       reason: "Valencian Community Day",
     },
     {
+      user_id: "irakli",
+      date: "2026-10-09",
+      reason: "Valencian Community Day",
+    },
+    {
       user_id: "alena",
+      date: "2026-10-12",
+      reason: "National Day of Spain",
+    },
+    {
+      user_id: "irakli",
       date: "2026-10-12",
       reason: "National Day of Spain",
     },
@@ -117,8 +127,8 @@ try {
     );
 
     assert(
-      githubCalls.length === 2,
-      "Normal working day must dispatch Nik and Alena Morning jobs"
+      githubCalls.length === 3,
+      "Normal working day must dispatch Nik, Alena and Irakli Morning jobs"
     );
 
     const clients = githubCalls
@@ -126,8 +136,8 @@ try {
       .sort();
 
     assert(
-      JSON.stringify(clients) === JSON.stringify(["alena", "nik"]),
-      "Working-day dispatch must target Nik and Alena only before Irakli cutover"
+      JSON.stringify(clients) === JSON.stringify(["alena", "irakli", "nik"]),
+      "Working-day dispatch must target Nik, Alena and Irakli after cutover"
     );
   }
 
