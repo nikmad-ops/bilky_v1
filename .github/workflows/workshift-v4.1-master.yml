@@ -46,6 +46,8 @@ on:
         type: choice
         options:
           - nik
+          - alena
+          - irakli
       client_label:
         description: 'Client label'
         required: true
