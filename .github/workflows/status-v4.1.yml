@@ -30,6 +30,11 @@ on:
         description: 'Authorized Telegram chat id'
         required: true
         type: string
+      non_working_days_json:
+        description: 'JSON array of non-working days for this client'
+        required: false
+        default: '[]'
+        type: string
 
 jobs:
   status:
@@ -53,6 +58,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ inputs.chat_id }}
           CLIENT_NAME: ${{ inputs.client_label }}
           AIRTOP_PROFILE_NAME: ${{ inputs.airtop_profile }}
+          NON_WORKING_DAYS_JSON: ${{ inputs.non_working_days_json }}
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
