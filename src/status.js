@@ -640,7 +640,13 @@ async function buildStatus({
 
   await bilky.readDayState(
     page,
-    today
+    today,
+    {
+      allowMissing:
+        nonWorkingDays.has(
+          today
+        ),
+    }
   );
 
   const lines =
