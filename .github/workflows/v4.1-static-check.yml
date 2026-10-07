@@ -12,7 +12,7 @@ on:
       - '.github/workflows/workshift-v4.1-master.yml'
       - '.github/workflows/status-v4.1.yml'
       - 'cloudflare/bilky-v4.1-control-plane.js'
-      - 'cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js'
+      - 'cloudflare/bilky-clients-scheduler-v4.1-bridge.js'
       - 'scripts/v4.1-non-working-days-test.mjs'
       - 'migrations/0001_non_working_days.sql'
       - '.github/workflows/v4.1-static-check.yml'
@@ -35,7 +35,7 @@ jobs:
           node --check src/status.js
           node --check src/workshift.js
           node --check cloudflare/bilky-v4.1-control-plane.js
-          node --check cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          node --check cloudflare/bilky-clients-scheduler-v4.1-bridge.js
           node --check scripts/v4.1-non-working-days-test.mjs
 
       - name: Parse workflow YAML
@@ -63,12 +63,12 @@ jobs:
           grep -q 'githubEnvironment: "client-irakli"' cloudflare/bilky-v4.1-control-plane.js
           grep -q 'airtopProfile: "bilky-irakli"' cloudflare/bilky-v4.1-control-plane.js
           grep -q 'SELECT date, reason FROM non_working_days' cloudflare/bilky-v4.1-control-plane.js
-          grep -q '{ id: "alena", name: "Alena", repo: "nikmad-ops/bilky_client_01", scheduled: false }' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
-          grep -q '{ id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: false }' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
-          grep -q 'dispatchStatus(env,c,chat,msg.message_id,"alena","client")' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
-          grep -q 'client.id==="nik" || client.id==="alena" || client.id==="irakli"' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
-          grep -q 'id==="nik" || id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
-          grep -q 'id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-alena-v4.1-bridge.js
+          grep -q '{ id: "alena", name: "Alena", repo: "nikmad-ops/bilky_client_01", scheduled: false }' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
+          grep -q '{ id: "irakli", name: "Irakli", repo: "nikmad-ops/bilky_client_02", scheduled: false }' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
+          grep -q 'dispatchStatus(env,c,chat,msg.message_id,"alena","client")' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
+          grep -q 'client.id==="nik" || client.id==="alena" || client.id==="irakli"' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
+          grep -q 'id==="nik" || id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
+          grep -q 'id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
           grep -q 'for CYCLE in 1 2 3' .github/workflows/workshift-v4.1-master.yml
           grep -q 'for LOCAL_ATTEMPT in 1 2 3 4 5' .github/workflows/workshift-v4.1-master.yml
           grep -q 'sleep 180' .github/workflows/workshift-v4.1-master.yml
