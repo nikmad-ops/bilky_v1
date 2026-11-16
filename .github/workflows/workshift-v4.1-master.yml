@@ -89,7 +89,7 @@ on:
       browser_provider:
         description: 'Browser provider'
         required: true
-        default: 'browserless'
+        default: 'scrapeless'
         type: choice
         options:
           - browserless
