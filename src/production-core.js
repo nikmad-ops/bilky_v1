@@ -7,6 +7,7 @@ export const WORKSHIFT_URL =
 export const TIMEZONE = "Europe/Madrid";
 
 const AIRTOP_SESSION_BUDGET_MS = 28000;
+const SCRAPELESS_SESSION_BUDGET_MS = 45000;
 const POST_LOGIN_STATE_TIMEOUT_MS = 8000;
 const FORENSIC_CAPTURE_BUDGET_MS = 1500;
 const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
@@ -75,19 +76,26 @@ export function createProductionClient({
   nif,
   password,
   airtopApiKey,
+  scrapelessApiKey,
+  provider = "airtop",
+  dryRun = false,
   attempt,
   diagnosticsDir = "diagnostics",
 }) {
   if (!nif) throw new Error("Missing BILKY_NIF");
   if (!password) throw new Error("Missing BILKY_PASSWORD");
-  if (!airtopApiKey) throw new Error("Missing AIRTOP_API_KEY");
+  if (!["airtop", "scrapeless"].includes(provider)) {
+    throw new Error(`Unsupported browser provider: ${provider}`);
+  }
+  if (provider === "airtop" && !airtopApiKey) throw new Error("Missing AIRTOP_API_KEY");
+  if (provider === "scrapeless" && !scrapelessApiKey) throw new Error("Missing SCRAPELESS_API_KEY");
   if (![1, 2, 3, 4, 5].includes(Number(attempt))) {
     throw new Error(`ATTEMPT must be 1..5. Got: ${attempt}`);
   }
 
   fs.mkdirSync(diagnosticsDir, { recursive: true });
 
-  const airtop = new AirtopClient({ apiKey: airtopApiKey });
+  const airtop = provider === "airtop" ? new AirtopClient({ apiKey: airtopApiKey }) : null;
 
   let sessionId = null;
   let browser = null;
@@ -108,71 +116,99 @@ export function createProductionClient({
   let sessionDeadline = 0;
 
   async function connect() {
-    log(`Creating Airtop session. attempt=${attempt}/5 solveCaptcha=true proxy=ES sticky=true`);
+    let cdpWsUrl = "";
+    let connectOptions = {};
 
-    const session = await airtop.sessions.create({
-      configuration: {
-        solveCaptcha: true,
-        proxy: {
-          country: "ES",
-          sticky: true,
+    if (provider === "airtop") {
+      log(`Creating Airtop session. attempt=${attempt}/5 solveCaptcha=true proxy=ES sticky=true`);
+
+      const session = await airtop.sessions.create({
+        configuration: {
+          solveCaptcha: true,
+          proxy: {
+            country: "ES",
+            sticky: true,
+          },
+          timeoutMinutes: 1,
+          profileName: AIRTOP_PROFILE_NAME,
+          persistProfile: true,
         },
-        timeoutMinutes: 1,
-        profileName: AIRTOP_PROFILE_NAME,
-        persistProfile: true,
-      },
-    });
-
-    sessionId = session.data.id;
-
-    if (!session.data.cdpWsUrl) {
-      throw new Error("Airtop session did not return cdpWsUrl");
-    }
-
-    sessionReadyAt = Date.now();
-    sessionDeadline = sessionReadyAt + AIRTOP_SESSION_BUDGET_MS;
-
-    log(
-      `Airtop session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms profile=${AIRTOP_PROFILE_NAME}`
-    );
-
-    try {
-      await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
-        const status = event?.status || "unknown";
-        const type = event?.type || "unknown";
-        const duration = event?.duration ?? "n/a";
-        const safeEvent = {
-          at: new Date().toISOString(),
-          status,
-          type,
-          durationMs:
-            typeof event?.duration === "number" ? event.duration : null,
-          solved: event?.solved === true,
-        };
-        captchaEvents.push(safeEvent);
-
-        log(`CAPTCHA event: status=${status} type=${type} durationMs=${duration}`);
-        fs.writeFileSync(
-          `${diagnosticsDir}/captcha-events.json`,
-          JSON.stringify(captchaEvents, null, 2),
-          "utf8"
-        );
       });
-      log("Airtop CAPTCHA event logging enabled.");
-    } catch (error) {
+
+      sessionId = session.data.id;
+
+      if (!session.data.cdpWsUrl) {
+        throw new Error("Airtop session did not return cdpWsUrl");
+      }
+
+      cdpWsUrl = session.data.cdpWsUrl;
+      connectOptions = {
+        headers: {
+          authorization: `Bearer ${airtopApiKey}`,
+        },
+        timeout: 120000,
+      };
+
+      sessionReadyAt = Date.now();
+      sessionDeadline = sessionReadyAt + provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS;
+
       log(
-        `Airtop CAPTCHA event logging unavailable: ${String(error?.message || error)
-          .split("\n")[0]
-          .slice(0, 200)}`
+        `Airtop session ready: ${sessionId}; budget=${provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS}ms profile=${AIRTOP_PROFILE_NAME}`
+      );
+
+      try {
+        await airtop.sessions.onCaptchaEvent(sessionId, (event) => {
+          const status = event?.status || "unknown";
+          const type = event?.type || "unknown";
+          const duration = event?.duration ?? "n/a";
+          const safeEvent = {
+            at: new Date().toISOString(),
+            status,
+            type,
+            durationMs:
+              typeof event?.duration === "number" ? event.duration : null,
+            solved: event?.solved === true,
+          };
+          captchaEvents.push(safeEvent);
+
+          log(`CAPTCHA event: status=${status} type=${type} durationMs=${duration}`);
+          fs.writeFileSync(
+            `${diagnosticsDir}/captcha-events.json`,
+            JSON.stringify(captchaEvents, null, 2),
+            "utf8"
+          );
+        });
+        log("Airtop CAPTCHA event logging enabled.");
+      } catch (error) {
+        log(
+          `Airtop CAPTCHA event logging unavailable: ${String(error?.message || error)
+            .split("\n")[0]
+            .slice(0, 200)}`
+        );
+      }
+    } else {
+      const sessionName = `bilky-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
+      const params = new URLSearchParams({
+        token: scrapelessApiKey,
+        sessionTTL: "60",
+        sessionName,
+        sessionRecording: "true",
+        proxyCountry: "ES",
+      });
+
+      cdpWsUrl = `wss://browser.scrapeless.com/api/v2/browser?${params.toString()}`;
+      connectOptions = { timeout: 20000 };
+
+      sessionReadyAt = Date.now();
+      sessionDeadline = sessionReadyAt + SCRAPELESS_SESSION_BUDGET_MS;
+      sessionId = sessionName;
+
+      log(
+        `Creating Scrapeless session. attempt=${attempt}/5 proxy=ES recording=true budget=${SCRAPELESS_SESSION_BUDGET_MS}ms`
       );
     }
 
-    browser = await chromium.connectOverCDP(session.data.cdpWsUrl, {
-      headers: {
-        authorization: `Bearer ${airtopApiKey}`,
-      },
-      timeout: 120000,
-    });
+    browser = await chromium.connectOverCDP(cdpWsUrl, connectOptions);
 
     context = browser.contexts()[0];
     if (!context) {
@@ -203,11 +239,11 @@ export function createProductionClient({
     });
 
     page.setDefaultTimeout(10000);
-    page.setDefaultNavigationTimeout(AIRTOP_SESSION_BUDGET_MS);
+    page.setDefaultNavigationTimeout(provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS);
   }
 
   function remainingSessionMs() {
-    if (!sessionDeadline) return AIRTOP_SESSION_BUDGET_MS;
+    if (!sessionDeadline) return provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS;
     return Math.max(0, sessionDeadline - Date.now());
   }
 
@@ -216,7 +252,7 @@ export function createProductionClient({
 
     if (remaining <= 0) {
       throw new Error(
-        `Airtop session budget exceeded at ${stage}: ${AIRTOP_SESSION_BUDGET_MS}ms`
+        `Airtop session budget exceeded at ${stage}: ${provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS}ms`
       );
     }
 
@@ -233,7 +269,7 @@ export function createProductionClient({
           () =>
             reject(
               new Error(
-                `Airtop session budget exceeded at ${stage}: ${AIRTOP_SESSION_BUDGET_MS}ms`
+                `Airtop session budget exceeded at ${stage}: ${provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS}ms`
               )
             ),
           remaining
@@ -249,7 +285,7 @@ export function createProductionClient({
     );
   }
 
-  async function waitForState(date, timeoutMs = AIRTOP_SESSION_BUDGET_MS) {
+  async function waitForState(date, timeoutMs = provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
       .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
@@ -530,7 +566,7 @@ export function createProductionClient({
   }
 
   async function openWorkshift(date) {
-    log("Opening direct Workshift URL through Airtop.");
+    log(`Opening direct Workshift URL through ${provider}.`);
 
     await withinSessionBudget(
       () =>
@@ -708,7 +744,7 @@ export function createProductionClient({
               : null,
           httpStatus: null,
           attempt: Number(attempt),
-          provider: "airtop",
+          provider,
         };
       }
 
@@ -723,7 +759,29 @@ export function createProductionClient({
         throw new Error(`${mode}: Clock in/out button is disabled`);
       }
 
-      log(`CLICK ${mode}: authorized production click via Airtop.`);
+      if (dryRun) {
+        const morningFact =
+          mode === "morning" ? null : await readFact(cells.nth(0));
+
+        log(`DRY RUN ${mode}: active Clock button confirmed; no click performed. provider=${provider}`);
+
+        return {
+          success: true,
+          status: "ready_to_click",
+          action: mode,
+          fact: null,
+          morningFact,
+          eveningFact: null,
+          duration: null,
+          httpStatus: null,
+          attempt: Number(attempt),
+          provider,
+          dryRun: true,
+          buttonExists: true,
+        };
+      }
+
+      log(`CLICK ${mode}: authorized production click via ${provider}.`);
 
       const responsePromise = page.waitForResponse(
         (response) =>
@@ -763,7 +821,7 @@ export function createProductionClient({
           {
             date,
             action: mode,
-            provider: "airtop",
+            provider,
             httpStatus: 200,
             attempt: Number(attempt),
             committedAt: new Date().toISOString(),
@@ -810,7 +868,7 @@ export function createProductionClient({
           responseBodyError: bodyReadError,
           responseTimesFound: facts.all.length,
           attempt: Number(attempt),
-          provider: "airtop",
+          provider,
         };
       }, "execute");
     } finally {
@@ -847,7 +905,7 @@ export function createProductionClient({
   async function close() {
     const activeSessionId = sessionId;
 
-    if (activeSessionId) {
+    if (provider === "airtop" && activeSessionId) {
       await terminateAirtopSession(activeSessionId).catch((error) => {
         log(
           `Airtop REST terminate warning: ${String(error?.message || error)
@@ -870,7 +928,7 @@ export function createProductionClient({
     }
 
     if (sessionReadyAt) {
-      log(`Airtop active session duration: ${Date.now() - sessionReadyAt}ms`);
+      log(`${provider} active session duration: ${Date.now() - sessionReadyAt}ms`);
     }
 
     browser = null;
