@@ -9,6 +9,8 @@ const {
   BILKY_NIF,
   BILKY_PASSWORD,
   AIRTOP_API_KEY,
+  SCRAPELESS_API_KEY,
+  BROWSER_PROVIDER = "airtop",
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -17,12 +19,21 @@ const {
 for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
-  AIRTOP_API_KEY,
   ACTION,
   ATTEMPT,
   EXECUTE,
 })) {
   if (!value) throw new Error(`Missing environment variable: ${name}`);
+}
+
+if (!["airtop", "scrapeless"].includes(BROWSER_PROVIDER)) {
+  throw new Error(`Unsupported BROWSER_PROVIDER: ${BROWSER_PROVIDER}`);
+}
+if (BROWSER_PROVIDER === "airtop" && !AIRTOP_API_KEY) {
+  throw new Error("Missing environment variable: AIRTOP_API_KEY");
+}
+if (BROWSER_PROVIDER === "scrapeless" && !SCRAPELESS_API_KEY) {
+  throw new Error("Missing environment variable: SCRAPELESS_API_KEY");
 }
 
 if (!["morning", "evening"].includes(ACTION)) {
@@ -44,6 +55,8 @@ const client = createProductionClient({
   nif: BILKY_NIF,
   password: BILKY_PASSWORD,
   airtopApiKey: AIRTOP_API_KEY,
+  scrapelessApiKey: SCRAPELESS_API_KEY,
+  provider: BROWSER_PROVIDER,
   attempt,
 });
 
@@ -55,6 +68,7 @@ async function main() {
   log(`TARGET_DATE=${date}`);
   log(`ACTION=${ACTION}`);
   log(`ATTEMPT=${attempt}/5`);
+  log(`BROWSER_PROVIDER=${BROWSER_PROVIDER}`);
 
   try {
     const result = await client.execute(ACTION, date);
