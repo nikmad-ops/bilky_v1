@@ -21,13 +21,23 @@ on:
       mode:
         required: true
         type: string
+      browser_provider:
+        required: false
+        type: string
+        default: airtop
+      dry_run:
+        required: false
+        type: boolean
+        default: false
     secrets:
       BILKY_NIF:
         required: true
       BILKY_PASSWORD:
         required: true
       AIRTOP_API_KEY:
-        required: true
+        required: false
+      SCRAPELESS_API_KEY:
+        required: false
       TELEGRAM_BOT_TOKEN:
         required: true
       TELEGRAM_CHAT_ID:
@@ -78,6 +88,19 @@ on:
         options:
           - manual
           - scheduled
+      browser_provider:
+        description: 'Browser provider'
+        required: true
+        default: 'scrapeless'
+        type: choice
+        options:
+          - scrapeless
+          - airtop
+      dry_run:
+        description: 'Stop before Clock click (single attempt, no Telegram)'
+        required: true
+        default: true
+        type: boolean
 
 concurrency:
   group: bilky-v4-${{ inputs.client_id }}-${{ inputs.action }}
@@ -96,12 +119,19 @@ jobs:
           CLIENT_ID: ${{ inputs.client_id }}
           ACTION: ${{ inputs.action }}
           MODE: ${{ inputs.mode }}
+          BROWSER_PROVIDER: ${{ inputs.browser_provider || 'airtop' }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
           set -euo pipefail
 
           [[ "${CLIENT_ID}" =~ ^(nik|alena|irakli)$ ]] || { echo "Invalid client_id"; exit 1; }
           [[ "${ACTION}" =~ ^(morning|evening)$ ]] || { echo "Invalid action"; exit 1; }
           [[ "${MODE}" =~ ^(manual|scheduled)$ ]] || { echo "Invalid mode"; exit 1; }
+          [[ "${BROWSER_PROVIDER}" =~ ^(airtop|scrapeless)$ ]] || { echo "Invalid browser_provider"; exit 1; }
+          if [ "${DRY_RUN}" = "true" ] && [ "${MODE}" != "manual" ]; then
+            echo "Dry-run is allowed only in manual mode"
+            exit 1
+          fi
 
           DOW=$(TZ=Europe/Madrid date +%u)
           [ "${DOW}" -le 5 ] || { echo "Blocked: weekend"; exit 1; }
@@ -139,6 +169,9 @@ jobs:
           BILKY_NIF: ${{ secrets.BILKY_NIF }}
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
+          SCRAPELESS_API_KEY: ${{ secrets.SCRAPELESS_API_KEY }}
+          BROWSER_PROVIDER: ${{ inputs.browser_provider || 'airtop' }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
@@ -192,6 +225,37 @@ jobs:
             fi
           }
 
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "=== CONTROLLED DRY RUN: one attempt, provider=$BROWSER_PROVIDER, NO CLOCK CLICK ==="
+            set +e
+            ACTION="$ACTION" ATTEMPT="1" EXECUTE="false" DRY_RUN="true" BROWSER_PROVIDER="$BROWSER_PROVIDER" npm run workshift
+            rc=$?
+            set -e
+
+            if [ "$rc" -ne 0 ] || [ ! -s run-result.json ]; then
+              if [ -s run-error.txt ]; then
+                last_error=$(head -c 500 run-error.txt)
+              else
+                last_error="dry-run workshift process rc=$rc"
+              fi
+              jq -n --arg client "$CLIENT_ID" --arg action "$ACTION" --arg provider "$BROWSER_PROVIDER" --arg error "$last_error" --argjson success false                 '{client:$client,action:$action,provider:$provider,success:$success,status:"dry_run_failed",error:$error}' > v4-result.json
+              exit 1
+            fi
+
+            status=$(jq -r '.status // empty' run-result.json)
+            success=$(jq -r '.success // false' run-result.json)
+
+            if [ "$success" = "true" ] && { [ "$status" = "ready_to_click" ] || [ "$status" = "already_done" ]; }; then
+              cp run-result.json v4-result.json
+              echo "DRY RUN SUCCESS: status=$status provider=$BROWSER_PROVIDER"
+              exit 0
+            fi
+
+            last_error="unexpected dry-run result: success=$success status=$status"
+            jq -n --arg client "$CLIENT_ID" --arg action "$ACTION" --arg provider "$BROWSER_PROVIDER" --arg error "$last_error" --argjson success false               '{client:$client,action:$action,provider:$provider,success:$success,status:"dry_run_failed",error:$error}' > v4-result.json
+            exit 1
+          fi
+
           for CYCLE in 1 2 3; do
             echo "=== V4.1 cycle ${CYCLE}/3 ==="
 
@@ -200,7 +264,7 @@ jobs:
               echo "=== V4.1 attempt ${GLOBAL_ATTEMPT}/15 (cycle=${CYCLE}, local=${LOCAL_ATTEMPT}/5) ==="
 
               set +e
-              ACTION="$ACTION" ATTEMPT="$LOCAL_ATTEMPT" EXECUTE="true" npm run workshift
+              ACTION="$ACTION" ATTEMPT="$LOCAL_ATTEMPT" EXECUTE="true" DRY_RUN="false" BROWSER_PROVIDER="$BROWSER_PROVIDER" npm run workshift
               rc=$?
               set -e
 
@@ -273,12 +337,18 @@ jobs:
         env:
           ACTION: ${{ inputs.action }}
           CLIENT_LABEL: ${{ inputs.client_label }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
           ADMIN_TELEGRAM_CHAT_ID: ${{ secrets.ADMIN_TELEGRAM_CHAT_ID }}
         run: |
           set -euo pipefail
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry-run: terminal Telegram notification suppressed."
+            exit 0
+          fi
 
           DATE=$(TZ=Europe/Madrid date +%d.%m.%Y)
 
