@@ -7,7 +7,7 @@ export const WORKSHIFT_URL =
 export const TIMEZONE = "Europe/Madrid";
 
 const AIRTOP_SESSION_BUDGET_MS = 28000;
-const SCRAPELESS_SESSION_BUDGET_MS = 90000;
+const SCRAPELESS_SESSION_BUDGET_MS = 28000;
 const POST_LOGIN_STATE_TIMEOUT_MS = 8000;
 const FORENSIC_CAPTURE_BUDGET_MS = 1500;
 const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
@@ -190,7 +190,7 @@ export function createProductionClient({
       const sessionName = `bilky-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
       const params = new URLSearchParams({
         token: scrapelessApiKey,
-        sessionTTL: "120",
+        sessionTTL: "60",
         sessionName,
         sessionRecording: "true",
         proxyCountry: "ES",
@@ -218,43 +218,3 @@ export function createProductionClient({
     page = context.pages()[0] || (await context.newPage());
 
     page.on("request", (request) => {
-      recentNetwork.push({
-        at: new Date().toISOString(),
-        kind: "request",
-        method: request.method(),
-        resourceType: request.resourceType(),
-        url: safeUrl(request.url()),
-      });
-      if (recentNetwork.length > 40) recentNetwork.splice(0, recentNetwork.length - 40);
-    });
-
-    page.on("response", (response) => {
-      recentNetwork.push({
-        at: new Date().toISOString(),
-        kind: "response",
-        status: response.status(),
-        url: safeUrl(response.url()),
-      });
-      if (recentNetwork.length > 40) recentNetwork.splice(0, recentNetwork.length - 40);
-    });
-
-    page.setDefaultTimeout(10000);
-    page.setDefaultNavigationTimeout(provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS);
-  }
-
-  function remainingSessionMs() {
-    if (!sessionDeadline) return provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS;
-    return Math.max(0, sessionDeadline - Date.now());
-  }
-
-  function assertSessionBudget(stage) {
-    const remaining = remainingSessionMs();
-
-    if (remaining <= 0) {
-      throw new Error(
-        `${provider} session budget exceeded at ${stage}: ${provider === "scrapeless" ? SCRAPELESS_SESSION_BUDGET_MS : AIRTOP_SESSION_BUDGET_MS}ms`
-      );
-    }
-
-    return remaining;
-  }
