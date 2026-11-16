@@ -34,6 +34,8 @@ on:
         required: false
       SCRAPELESS_API_KEY:
         required: false
+      BROWSERLESS_TOKEN:
+        required: false
       TELEGRAM_BOT_TOKEN:
         required: true
       TELEGRAM_CHAT_ID:
@@ -90,6 +92,7 @@ on:
         default: 'scrapeless'
         type: choice
         options:
+          - browserless
           - scrapeless
           - airtop
 
@@ -117,7 +120,7 @@ jobs:
           [[ "${CLIENT_ID}" =~ ^(nik|alena|irakli)$ ]] || { echo "Invalid client_id"; exit 1; }
           [[ "${ACTION}" =~ ^(morning|evening)$ ]] || { echo "Invalid action"; exit 1; }
           [[ "${MODE}" =~ ^(manual|scheduled)$ ]] || { echo "Invalid mode"; exit 1; }
-          [[ "${BROWSER_PROVIDER}" =~ ^(airtop|scrapeless)$ ]] || { echo "Invalid browser_provider"; exit 1; }
+          [[ "${BROWSER_PROVIDER}" =~ ^(airtop|scrapeless|browserless)$ ]] || { echo "Invalid browser_provider"; exit 1; }
 
           DOW=$(TZ=Europe/Madrid date +%u)
           [ "${DOW}" -le 5 ] || { echo "Blocked: weekend"; exit 1; }
@@ -156,6 +159,7 @@ jobs:
           BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
           AIRTOP_API_KEY: ${{ secrets.AIRTOP_API_KEY }}
           SCRAPELESS_API_KEY: ${{ secrets.SCRAPELESS_API_KEY }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
           BROWSER_PROVIDER: ${{ inputs.browser_provider || 'airtop' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
