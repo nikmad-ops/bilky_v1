@@ -309,7 +309,6 @@ async function main() {
   const params = new URLSearchParams({
     token,
     solveCaptchas: "true",
-    humanlike: "true",
     timeout: "60000",
   });
   if (profile) params.set("profile", profile);
@@ -322,7 +321,6 @@ async function main() {
     region,
     route: "/stealth",
     solveCaptchas: true,
-    humanlike: true,
     proxy: "none",
     profile: profile || null,
     maxSessionsThisRun: 1,
