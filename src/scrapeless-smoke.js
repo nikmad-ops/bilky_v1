@@ -327,16 +327,6 @@ async function main() {
   attachPageLogging();
 
   cdp = await context.newCDPSession(page);
-  try {
-    const live = await cdp.send("Agent.liveURL");
-    log("Scrapeless live session available", {
-      liveURL: live?.liveURL || live?.url || null,
-    });
-  } catch (error) {
-    log("Scrapeless live session URL unavailable", {
-      error: String(error?.message || error).split("\n")[0],
-    });
-  }
 
   await snapshot("00-connected");
 
