@@ -76,17 +76,19 @@ export function createProductionClient({
   password,
   airtopApiKey,
   scrapelessApiKey,
+  browserlessToken,
   provider = "airtop",
   attempt,
   diagnosticsDir = "diagnostics",
 }) {
   if (!nif) throw new Error("Missing BILKY_NIF");
   if (!password) throw new Error("Missing BILKY_PASSWORD");
-  if (!["airtop", "scrapeless"].includes(provider)) {
+  if (!["airtop", "scrapeless", "browserless"].includes(provider)) {
     throw new Error(`Unsupported browser provider: ${provider}`);
   }
   if (provider === "airtop" && !airtopApiKey) throw new Error("Missing AIRTOP_API_KEY");
   if (provider === "scrapeless" && !scrapelessApiKey) throw new Error("Missing SCRAPELESS_API_KEY");
+  if (provider === "browserless" && !browserlessToken) throw new Error("Missing BROWSERLESS_TOKEN");
   if (![1, 2, 3, 4, 5].includes(Number(attempt))) {
     throw new Error(`ATTEMPT must be 1..5. Got: ${attempt}`);
   }
@@ -180,7 +182,7 @@ export function createProductionClient({
         },
         timeout: 120000,
       });
-    } else {
+    } else if (provider === "scrapeless") {
       const sessionName = `bilky-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
       const params = new URLSearchParams({
         token: scrapelessApiKey,
@@ -203,6 +205,36 @@ export function createProductionClient({
 
       log(
         `Scrapeless session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms`
+      );
+    } else {
+      const region = String(process.env.BROWSERLESS_REGION || "ams").trim().toLowerCase();
+      if (!["ams", "lon", "sfo"].includes(region)) {
+        throw new Error(`Invalid BROWSERLESS_REGION: ${region}`);
+      }
+
+      const params = new URLSearchParams({
+        token: browserlessToken,
+        solveCaptchas: "true",
+        timeout: "60000",
+      });
+
+      const profile = String(process.env.BROWSERLESS_PROFILE || "").trim();
+      if (profile) params.set("profile", profile);
+
+      const host = `production-${region}.browserless.io`;
+      log(`Creating Browserless session. attempt=${attempt}/5 region=${region} route=/stealth solveCaptchas=true`);
+
+      browser = await chromium.connectOverCDP(
+        `wss://${host}/stealth?${params.toString()}`,
+        { timeout: 20000 }
+      );
+
+      sessionId = `browserless-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
+      sessionReadyAt = Date.now();
+      sessionDeadline = sessionReadyAt + AIRTOP_SESSION_BUDGET_MS;
+
+      log(
+        `Browserless session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms`
       );
     }
 
