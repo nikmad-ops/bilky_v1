@@ -1,0 +1,96 @@
+name: Bilky | Browserless Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_id:
+        description: 'Client to test'
+        required: true
+        default: 'nik'
+        type: choice
+        options:
+          - nik
+          - alena
+          - irakli
+      browserless_region:
+        description: 'Browserless region'
+        required: true
+        default: 'ams'
+        type: choice
+        options:
+          - ams
+          - lon
+          - sfo
+      browserless_profile:
+        description: 'Optional Browserless authenticated profile name'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: bilky-browserless-diagnostic-${{ inputs.client_id }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: client-${{ inputs.client_id }}
+
+    steps:
+      - name: Safety gate
+        shell: bash
+        env:
+          CLIENT_ID: ${{ inputs.client_id }}
+          REGION: ${{ inputs.browserless_region }}
+        run: |
+          set -euo pipefail
+          [[ "${CLIENT_ID}" =~ ^(nik|alena|irakli)$ ]] || { echo "Invalid client_id"; exit 1; }
+          [[ "${REGION}" =~ ^(ams|lon|sfo)$ ]] || { echo "Invalid browserless_region"; exit 1; }
+          echo "READ-ONLY diagnostic. No Clock action exists in this workflow."
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Run one Browserless read-only session
+        id: smoke
+        shell: bash
+        env:
+          CLIENT_ID: ${{ inputs.client_id }}
+          BROWSERLESS_REGION: ${{ inputs.browserless_region }}
+          BROWSERLESS_PROFILE: ${{ inputs.browserless_profile }}
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          BILKY_NIF: ${{ secrets.BILKY_NIF }}
+          BILKY_PASSWORD: ${{ secrets.BILKY_PASSWORD }}
+          DIAGNOSTICS_DIR: browserless-diagnostics
+        run: |
+          set -uo pipefail
+          node src/browserless-smoke.js 2>&1 | tee browserless-smoke.log
+          rc=${PIPESTATUS[0]}
+          echo "exit_code=${rc}" >> "$GITHUB_OUTPUT"
+          exit "${rc}"
+
+      - name: Upload Browserless forensic diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browserless-${{ inputs.client_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            browserless-diagnostics/**
+            browserless-smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Print compact diagnostic summary
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Browserless diagnostic summary ==="
+          find browserless-diagnostics -name summary.json -type f -maxdepth 3 -print -exec cat {} \; 2>/dev/null || true
