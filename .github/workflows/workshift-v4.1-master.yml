@@ -29,6 +29,10 @@ on:
         required: false
         type: boolean
         default: false
+      single_attempt:
+        required: false
+        type: boolean
+        default: false
     secrets:
       BILKY_NIF:
         required: true
@@ -101,6 +105,11 @@ on:
         required: true
         default: true
         type: boolean
+      single_attempt:
+        description: 'Manual controlled test: one attempt only, no recovery loop'
+        required: true
+        default: true
+        type: boolean
 
 concurrency:
   group: bilky-v4-${{ inputs.client_id }}-${{ inputs.action }}
@@ -121,6 +130,7 @@ jobs:
           MODE: ${{ inputs.mode }}
           BROWSER_PROVIDER: ${{ inputs.browser_provider || 'airtop' }}
           DRY_RUN: ${{ inputs.dry_run || false }}
+          SINGLE_ATTEMPT: ${{ inputs.single_attempt || false }}
         run: |
           set -euo pipefail
 
@@ -130,6 +140,10 @@ jobs:
           [[ "${BROWSER_PROVIDER}" =~ ^(airtop|scrapeless)$ ]] || { echo "Invalid browser_provider"; exit 1; }
           if [ "${DRY_RUN}" = "true" ] && [ "${MODE}" != "manual" ]; then
             echo "Dry-run is allowed only in manual mode"
+            exit 1
+          fi
+          if [ "${SINGLE_ATTEMPT}" = "true" ] && [ "${MODE}" != "manual" ]; then
+            echo "single_attempt is allowed only in manual mode"
             exit 1
           fi
 
@@ -172,6 +186,7 @@ jobs:
           SCRAPELESS_API_KEY: ${{ secrets.SCRAPELESS_API_KEY }}
           BROWSER_PROVIDER: ${{ inputs.browser_provider || 'airtop' }}
           DRY_RUN: ${{ inputs.dry_run || false }}
+          SINGLE_ATTEMPT: ${{ inputs.single_attempt || false }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
@@ -253,6 +268,36 @@ jobs:
 
             last_error="unexpected dry-run result: success=$success status=$status"
             jq -n --arg client "$CLIENT_ID" --arg action "$ACTION" --arg provider "$BROWSER_PROVIDER" --arg error "$last_error" --argjson success false               '{client:$client,action:$action,provider:$provider,success:$success,status:"dry_run_failed",error:$error}' > v4-result.json
+            exit 1
+          fi
+
+          if [ "$SINGLE_ATTEMPT" = "true" ]; then
+            echo "=== CONTROLLED SINGLE WRITE ATTEMPT: provider=$BROWSER_PROVIDER ==="
+            set +e
+            ACTION="$ACTION" ATTEMPT="1" EXECUTE="true" DRY_RUN="false" BROWSER_PROVIDER="$BROWSER_PROVIDER" npm run workshift
+            rc=$?
+            set -e
+
+            if [ "$rc" -eq 0 ] && [ -s run-result.json ]; then
+              success=$(jq -r '.success // false' run-result.json)
+              status=$(jq -r '.status // empty' run-result.json)
+              fact=$(jq -r '.fact // empty' run-result.json)
+              http=$(jq -r '.httpStatus // empty' run-result.json)
+
+              if [ "$success" = "true" ] && { [ "$status" = "clicked" ] || [ "$status" = "already_done" ]; }; then
+                cp run-result.json v4-result.json
+                echo "SINGLE ATTEMPT SUCCESS: status=$status fact=$fact http=$http provider=$BROWSER_PROVIDER"
+                exit 0
+              fi
+            fi
+
+            if [ -s run-error.txt ]; then
+              last_error=$(head -c 500 run-error.txt)
+            else
+              last_error="single-attempt workshift process rc=$rc"
+            fi
+
+            jq -n --arg client "$CLIENT_ID" --arg action "$ACTION" --arg provider "$BROWSER_PROVIDER" --arg error "$last_error" --argjson success false               '{client:$client,action:$action,provider:$provider,success:$success,status:"single_attempt_failed",error:$error}' > v4-result.json
             exit 1
           fi
 
@@ -338,6 +383,7 @@ jobs:
           ACTION: ${{ inputs.action }}
           CLIENT_LABEL: ${{ inputs.client_label }}
           DRY_RUN: ${{ inputs.dry_run || false }}
+          SINGLE_ATTEMPT: ${{ inputs.single_attempt || false }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_TELEGRAM_BOT_TOKEN: ${{ secrets.ADMIN_TELEGRAM_BOT_TOKEN }}
@@ -345,8 +391,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "Dry-run: terminal Telegram notification suppressed."
+          if [ "$DRY_RUN" = "true" ] || [ "$SINGLE_ATTEMPT" = "true" ]; then
+            echo "Controlled manual test: terminal Telegram notification suppressed."
             exit 0
           fi
 
@@ -358,70 +404,3 @@ jobs:
             SUCCESS=$(jq -r '.success' v4-result.json)
             FACT=$(jq -r '.fact // empty' v4-result.json)
             RESULT_STATUS=$(jq -r '.status // empty' v4-result.json)
-            RESULT_ATTEMPTS=$(jq -r '.attempts // 0' v4-result.json)
-          else
-            SUCCESS=false
-            FACT=""
-            RESULT_STATUS=""
-            RESULT_ATTEMPTS=0
-          fi
-
-          if [ "$ACTION" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
-
-          send_message() {
-            local bot_token="$1"
-            local chat_id="$2"
-            local message="$3"
-            [ -n "$bot_token" ] || return 0
-            [ -n "$chat_id" ] || return 0
-            curl --fail --silent --show-error               --request POST               --header 'Content-Type: application/json'               --data "$(jq -nc --arg chat_id "$chat_id" --arg text "$message" '{chat_id:$chat_id,text:$text}')"               "https://api.telegram.org/bot${bot_token}/sendMessage" >/dev/null
-          }
-
-          if [ "$SUCCESS" = "true" ]; then
-            if [ -n "$FACT" ]; then
-              USER_MESSAGE="✅ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. Fact: ${FACT:0:5}"
-            else
-              USER_MESSAGE="✅ Bilky for ${CLIENT_LABEL} ${DATE}: ${LABEL}. SUCCESS"
-            fi
-            ADMIN_MESSAGE="$USER_MESSAGE"
-          else
-            USER_MESSAGE="Bilky for ${CLIENT_LABEL}: ${LABEL} could not be confirmed automatically yet. No action is required from you."
-            if [ "$RESULT_PRESENT" = "true" ] && [ "$RESULT_STATUS" = "requires_attention" ] && [ "$RESULT_ATTEMPTS" = "15" ]; then
-              ADMIN_MESSAGE="⚠️ Bilky for ${CLIENT_LABEL}: ${LABEL} requires attention. Automatic recovery exhausted after 15 attempts."
-            else
-              ADMIN_MESSAGE="⚠️ Bilky for ${CLIENT_LABEL}: ${LABEL} requires attention. Recovery workflow ended unexpectedly before a terminal result."
-            fi
-          fi
-
-          CLIENT_RC=0
-          ADMIN_RC=0
-
-          send_message "$TELEGRAM_BOT_TOKEN" "$TELEGRAM_CHAT_ID" "$USER_MESSAGE" || CLIENT_RC=$?
-
-          if [ -n "$ADMIN_TELEGRAM_BOT_TOKEN" ] && [ -n "$ADMIN_TELEGRAM_CHAT_ID" ]; then
-            if [ "$ADMIN_TELEGRAM_BOT_TOKEN" != "$TELEGRAM_BOT_TOKEN" ] || [ "$ADMIN_TELEGRAM_CHAT_ID" != "$TELEGRAM_CHAT_ID" ] || [ "$ADMIN_MESSAGE" != "$USER_MESSAGE" ]; then
-              send_message "$ADMIN_TELEGRAM_BOT_TOKEN" "$ADMIN_TELEGRAM_CHAT_ID" "$ADMIN_MESSAGE" || ADMIN_RC=$?
-            fi
-          fi
-
-          if [ "$CLIENT_RC" -ne 0 ] || [ "$ADMIN_RC" -ne 0 ]; then
-            echo "::warning::Telegram delivery failed: client_rc=$CLIENT_RC admin_rc=$ADMIN_RC; Bilky business result unchanged"
-          fi
-
-          exit 0
-
-      - name: Upload v4 diagnostics
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: bilky-v4-${{ github.run_id }}
-          path: |
-            v4-result.json
-            v4-attempts.ndjson
-            diagnostics/
-            run-result.json
-            run-error.txt
-            run-committed.json
-          if-no-files-found: ignore
-          retention-days: 14
