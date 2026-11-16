@@ -208,7 +208,7 @@ export function createProductionClient({
 
     context = browser.contexts()[0];
     if (!context) {
-      throw new Error("Airtop default browser context not found");
+      throw new Error(`${provider} default browser context not found`);
     }
 
     page = context.pages()[0] || (await context.newPage());
