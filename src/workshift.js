@@ -9,17 +9,15 @@ const {
   BILKY_NIF,
   BILKY_PASSWORD,
   AIRTOP_API_KEY,
-  SCRAPELESS_API_KEY,
-  BROWSER_PROVIDER = "airtop",
   ACTION,
   ATTEMPT,
   EXECUTE,
-  DRY_RUN = "false",
 } = process.env;
 
 for (const [name, value] of Object.entries({
   BILKY_NIF,
   BILKY_PASSWORD,
+  AIRTOP_API_KEY,
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -31,20 +29,8 @@ if (!["morning", "evening"].includes(ACTION)) {
   throw new Error(`ACTION must be morning or evening. Got: ${ACTION}`);
 }
 
-if (!["true", "false"].includes(EXECUTE)) {
-  throw new Error("EXECUTE must equal true or false");
-}
-
-if (!["airtop", "scrapeless"].includes(BROWSER_PROVIDER)) {
-  throw new Error(`Unsupported BROWSER_PROVIDER: ${BROWSER_PROVIDER}`);
-}
-
-if (BROWSER_PROVIDER === "airtop" && !AIRTOP_API_KEY) {
-  throw new Error("Missing environment variable: AIRTOP_API_KEY");
-}
-
-if (BROWSER_PROVIDER === "scrapeless" && !SCRAPELESS_API_KEY) {
-  throw new Error("Missing environment variable: SCRAPELESS_API_KEY");
+if (EXECUTE !== "true") {
+  throw new Error("Execution blocked: EXECUTE must equal true");
 }
 
 const attempt = Number(ATTEMPT);
@@ -58,9 +44,6 @@ const client = createProductionClient({
   nif: BILKY_NIF,
   password: BILKY_PASSWORD,
   airtopApiKey: AIRTOP_API_KEY,
-  scrapelessApiKey: SCRAPELESS_API_KEY,
-  provider: BROWSER_PROVIDER,
-  dryRun: DRY_RUN === "true" || EXECUTE === "false",
   attempt,
 });
 
@@ -72,8 +55,6 @@ async function main() {
   log(`TARGET_DATE=${date}`);
   log(`ACTION=${ACTION}`);
   log(`ATTEMPT=${attempt}/5`);
-  log(`BROWSER_PROVIDER=${BROWSER_PROVIDER}`);
-  log(`DRY_RUN=${DRY_RUN === "true" || EXECUTE === "false"}`);
 
   try {
     const result = await client.execute(ACTION, date);
