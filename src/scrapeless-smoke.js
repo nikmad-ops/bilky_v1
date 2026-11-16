@@ -395,12 +395,22 @@ async function main() {
   }
 
   log("STEP 4 navigate to Workshift through dashboard link");
-  const workshiftLink = page
-    .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
-    .first();
+  const workshiftLinks = page.locator(
+    'a[href*="/employee/hour-registration/hour-registration/show/"]'
+  );
+  const workshiftLinkCount = await workshiftLinks.count();
+  let workshiftLink = null;
 
-  if (!(await workshiftLink.count())) {
-    throw new Error("Workshift link not found on dashboard");
+  for (let i = 0; i < workshiftLinkCount; i += 1) {
+    const candidate = workshiftLinks.nth(i);
+    if (await candidate.isVisible().catch(() => false)) {
+      workshiftLink = candidate;
+      break;
+    }
+  }
+
+  if (!workshiftLink) {
+    throw new Error("Visible Workshift link not found on dashboard");
   }
 
   await workshiftLink.scrollIntoViewIfNeeded().catch(() => {});
