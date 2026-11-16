@@ -101,6 +101,7 @@ export function createProductionClient({
   let browser = null;
   let context = null;
   let page = null;
+  let scrapelessCdp = null;
   const captchaEvents = [];
   const recentNetwork = [];
 
@@ -245,6 +246,38 @@ export function createProductionClient({
 
     page = context.pages()[0] || (await context.newPage());
 
+    if (provider === "scrapeless") {
+      scrapelessCdp = await context.newCDPSession(page);
+
+      for (const eventName of [
+        "Captcha.detected",
+        "Captcha.solveFinished",
+        "Captcha.solveFailed",
+      ]) {
+        scrapelessCdp.on(eventName, (event) => {
+          const safeEvent = {
+            at: new Date().toISOString(),
+            provider: "scrapeless",
+            event: eventName,
+            type: event?.type || null,
+            success: event?.success ?? null,
+            message: event?.message || null,
+          };
+          captchaEvents.push(safeEvent);
+          log(
+            `Scrapeless ${eventName}: type=${safeEvent.type || "unknown"} success=${safeEvent.success ?? "n/a"} message=${safeEvent.message || "n/a"}`
+          );
+          fs.writeFileSync(
+            `${diagnosticsDir}/captcha-events.json`,
+            JSON.stringify(captchaEvents, null, 2),
+            "utf8"
+          );
+        });
+      }
+
+      log("Scrapeless CAPTCHA lifecycle logging enabled.");
+    }
+
     page.on("request", (request) => {
       recentNetwork.push({
         at: new Date().toISOString(),
@@ -273,6 +306,30 @@ export function createProductionClient({
   function remainingSessionMs() {
     if (!sessionDeadline) return AIRTOP_SESSION_BUDGET_MS;
     return Math.max(0, sessionDeadline - Date.now());
+  }
+
+  function armScrapelessCaptchaSolve(stage) {
+    if (provider !== "scrapeless" || !scrapelessCdp) return;
+
+    const remaining = remainingSessionMs();
+    if (remaining <= 1000) return;
+
+    const detectTimeout = Math.max(1000, Math.min(8000, remaining - 1000));
+
+    scrapelessCdp
+      .send("Captcha.solve", { detectTimeout })
+      .then((result) => {
+        log(
+          `Scrapeless Captcha.solve ${stage}: success=${result?.success ?? "n/a"} message=${result?.message || "n/a"} type=${result?.type || "unknown"}`
+        );
+      })
+      .catch((error) => {
+        log(
+          `Scrapeless Captcha.solve ${stage} warning: ${String(error?.message || error)
+            .split("\n")[0]
+            .slice(0, 200)}`
+        );
+      });
   }
 
   function assertSessionBudget(stage) {
@@ -581,6 +638,8 @@ export function createProductionClient({
 
     log("Submitting Bilky login form via requestSubmit (viewport-independent).");
 
+    armScrapelessCaptchaSolve("login-submit");
+
     await submit.evaluate((el) => {
       const form = el.form;
       if (form && typeof form.requestSubmit === "function") {
@@ -595,6 +654,8 @@ export function createProductionClient({
 
   async function openWorkshift(date) {
     log(`Opening direct Workshift URL through ${provider}.`);
+
+    armScrapelessCaptchaSolve("initial-workshift");
 
     await withinSessionBudget(
       () =>
@@ -623,6 +684,8 @@ export function createProductionClient({
       log(
         `Dashboard detected; opening Workshift by authenticated URL. href=${href}`
       );
+
+      armScrapelessCaptchaSolve("dashboard-workshift");
 
       await withinSessionBudget(
         () =>
@@ -940,6 +1003,7 @@ export function createProductionClient({
     browser = null;
     context = null;
     page = null;
+    scrapelessCdp = null;
     sessionId = null;
     sessionReadyAt = 0;
     sessionDeadline = 0;
