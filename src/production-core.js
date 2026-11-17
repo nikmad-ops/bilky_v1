@@ -8,7 +8,7 @@ export const TIMEZONE = "Europe/Madrid";
 
 const AIRTOP_SESSION_BUDGET_MS = 28000;
 const POST_LOGIN_STATE_TIMEOUT_MS = 8000;
-const FORENSIC_CAPTURE_BUDGET_MS = 1500;
+const FORENSIC_CAPTURE_BUDGET_MS = 3500;
 const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
 
 export function log(message) {
@@ -545,7 +545,7 @@ export function createProductionClient({
             await page.screenshot({
               path: `${diagnosticsDir}/forensic-${reason}.png`,
               fullPage: false,
-              timeout: Math.min(500, remaining),
+              timeout: Math.min(1500, remaining),
             });
           } finally {
             await page.evaluate(() => {
@@ -940,6 +940,36 @@ export function createProductionClient({
           provider,
         };
       }, "execute");
+    } catch (error) {
+      const failure = {
+        capturedAt: new Date().toISOString(),
+        provider,
+        attempt: Number(attempt),
+        date,
+        action: mode,
+        sessionId,
+        sessionReadyAt: sessionReadyAt || null,
+        sessionAgeMs: sessionReadyAt ? Date.now() - sessionReadyAt : null,
+        url: page ? safeUrl(page.url()) : "",
+        message: String(error?.message || error || "Unknown error").slice(0, 1000),
+        stack: String(error?.stack || "").slice(0, 8000),
+      };
+
+      fs.writeFileSync(
+        `${diagnosticsDir}/error.json`,
+        JSON.stringify(failure, null, 2),
+        "utf8"
+      );
+
+      await captureForensic("failure", date).catch((forensicError) => {
+        log(
+          `Forensic capture warning: ${String(forensicError?.message || forensicError)
+            .split("\n")[0]
+            .slice(0, 200)}`
+        );
+      });
+
+      throw error;
     } finally {
       await close();
     }
