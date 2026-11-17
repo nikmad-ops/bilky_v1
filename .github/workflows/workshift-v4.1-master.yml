@@ -222,7 +222,7 @@ jobs:
               echo "=== V4.1 attempt ${GLOBAL_ATTEMPT}/15 (cycle=${CYCLE}, local=${LOCAL_ATTEMPT}/5) ==="
 
               set +e
-              ACTION="$ACTION" ATTEMPT="$LOCAL_ATTEMPT" EXECUTE="true" BROWSER_PROVIDER="$BROWSER_PROVIDER" npm run workshift
+              ACTION="$ACTION" ATTEMPT="$LOCAL_ATTEMPT" GLOBAL_ATTEMPT="$GLOBAL_ATTEMPT" EXECUTE="true" BROWSER_PROVIDER="$BROWSER_PROVIDER" npm run workshift
               rc=$?
               set -e
 
