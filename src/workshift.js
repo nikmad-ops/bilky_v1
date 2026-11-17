@@ -12,6 +12,7 @@ const {
   SCRAPELESS_API_KEY,
   BROWSERLESS_TOKEN,
   BROWSER_PROVIDER = "airtop",
+  GLOBAL_ATTEMPT,
   ACTION,
   ATTEMPT,
   EXECUTE,
@@ -54,6 +55,11 @@ if (![1, 2, 3, 4, 5].includes(attempt)) {
 }
 
 const date = madridDate();
+const globalAttempt = Number(GLOBAL_ATTEMPT || ATTEMPT);
+if (!Number.isInteger(globalAttempt) || globalAttempt < 1 || globalAttempt > 15) {
+  throw new Error(`GLOBAL_ATTEMPT must be 1..15. Got: ${GLOBAL_ATTEMPT || ATTEMPT}`);
+}
+const diagnosticsDir = `diagnostics/attempt-${String(globalAttempt).padStart(2, "0")}`;
 
 const client = createProductionClient({
   nif: BILKY_NIF,
@@ -63,6 +69,7 @@ const client = createProductionClient({
   browserlessToken: BROWSERLESS_TOKEN,
   provider: BROWSER_PROVIDER,
   attempt,
+  diagnosticsDir,
 });
 
 async function main() {
@@ -73,7 +80,9 @@ async function main() {
   log(`TARGET_DATE=${date}`);
   log(`ACTION=${ACTION}`);
   log(`ATTEMPT=${attempt}/5`);
+  log(`GLOBAL_ATTEMPT=${globalAttempt}/15`);
   log(`BROWSER_PROVIDER=${BROWSER_PROVIDER}`);
+  log(`DIAGNOSTICS_DIR=${diagnosticsDir}`);
 
   try {
     const result = await client.execute(ACTION, date);
