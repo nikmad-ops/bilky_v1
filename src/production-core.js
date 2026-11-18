@@ -326,7 +326,7 @@ export function createProductionClient({
     });
 
     page.setDefaultTimeout(10000);
-    page.setDefaultNavigationTimeout(AIRTOP_SESSION_BUDGET_MS);
+    page.setDefaultNavigationTimeout(sessionBudgetMs());
   }
 
   function remainingSessionMs() {
@@ -342,7 +342,6 @@ export function createProductionClient({
         const text = document.body?.innerText || "";
         const html = document.documentElement?.outerHTML || "";
         return (
-          /\/cdn-cgi\/challenge-platform\//i.test(html) ||
           Boolean(
             document.querySelector(
               '[name="cf-turnstile-response"], iframe[src*="turnstile"], [id*="cf-chl"], [class*="cf-chl"], [data-cf-chl]'
@@ -377,28 +376,32 @@ export function createProductionClient({
       scrapelessCaptchaWaiter = resolve;
     });
 
-    const commandPromise = scrapelessCdp
+    scrapelessCdp
       .send("Captcha.solve", {
         detectTimeout: Math.max(1000, Math.min(12000, remaining - 1000)),
       })
-      .then((result) => ({
-        source: "command",
-        success: result?.success ?? null,
-        message: result?.message || null,
-        type: result?.type || null,
-      }))
-      .catch((error) => ({
-        source: "command",
-        success: false,
-        message: String(error?.message || error).split("\n")[0].slice(0, 200),
-        type: null,
-      }));
+      .then((result) => {
+        log(
+          `Scrapeless Captcha.solve command ${stage}: success=${result?.success ?? "n/a"} message=${result?.message || "n/a"} type=${result?.type || "unknown"}`
+        );
+      })
+      .catch((error) => {
+        log(
+          `Scrapeless Captcha.solve command ${stage} warning: ${String(error?.message || error)
+            .split("\n")[0]
+            .slice(0, 200)}`
+        );
+      });
 
     const timeoutMs = Math.max(1, remainingSessionMs());
     const terminal = await Promise.race([
       eventPromise.then((result) => ({ source: "event", ...result })),
-      commandPromise,
-      sleep(timeoutMs).then(() => ({ source: "budget", success: false, message: "session budget reached", type: null })),
+      sleep(timeoutMs).then(() => ({
+        source: "budget",
+        success: false,
+        message: "session budget reached",
+        type: null,
+      })),
     ]);
 
     if (terminal.source !== "event" && scrapelessCaptchaWaiter) {
@@ -479,7 +482,7 @@ export function createProductionClient({
       }
 
       const hasWorkshiftLink = (await workshiftLink.count().catch(() => 0)) > 0;
-      if (isDashboardUrl() && hasWorkshiftLink) {
+      if (hasWorkshiftLink) {
         return "dashboard";
       }
 
@@ -689,7 +692,7 @@ export function createProductionClient({
       }
 
       const hasWorkshiftLink = (await workshiftLink.count().catch(() => 0)) > 0;
-      if (isDashboardUrl() && hasWorkshiftLink) {
+      if (hasWorkshiftLink) {
         return "dashboard";
       }
 
