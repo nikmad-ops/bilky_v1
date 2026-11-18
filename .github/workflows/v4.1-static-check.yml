@@ -53,8 +53,9 @@ jobs:
           if (!cfg.clients.alena.enabled || !cfg.clients.alena.scheduled) throw new Error("Alena must be enabled");
           if (!cfg.clients.irakli.enabled || !cfg.clients.irakli.scheduled) throw new Error("Irakli must be enabled in v4.1");
           if (cfg.recovery.cycles!==3 || cfg.recovery.attemptsPerCycle!==5) throw new Error("Recovery must remain 3x5");
-          if (cfg.recovery.retryMinutes!==3) throw new Error("Retry delay must remain 3 minutes");
+          if (cfg.recovery.retryMinutes!==2) throw new Error("Retry delay must remain 2 minutes");
           if (cfg.recovery.airtopSessionBudgetMs!==28000) throw new Error("Airtop budget must remain 28 seconds");
+          if (cfg.recovery.scrapelessSessionBudgetMs!==50000) throw new Error("Scrapeless budget must remain 50 seconds");
           if (cfg.recovery.postLoginStateTimeoutMs!==8000) throw new Error("Post-login timeout must remain 8 seconds");
           NODE
 
@@ -71,7 +72,7 @@ jobs:
           grep -q 'id==="alena" || id==="irakli"' cloudflare/bilky-clients-scheduler-v4.1-bridge.js
           grep -q 'for CYCLE in 1 2 3' .github/workflows/workshift-v4.1-master.yml
           grep -q 'for LOCAL_ATTEMPT in 1 2 3 4 5' .github/workflows/workshift-v4.1-master.yml
-          grep -q 'sleep 180' .github/workflows/workshift-v4.1-master.yml
+          grep -q 'sleep 120' .github/workflows/workshift-v4.1-master.yml
           grep -q 'timeout-minutes: 70' .github/workflows/workshift-v4.1-master.yml
           echo "Bilky v4.1 migration invariants OK"
 
