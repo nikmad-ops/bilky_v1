@@ -257,8 +257,8 @@ jobs:
 
               if [ "$GLOBAL_ATTEMPT" -lt 15 ]; then
                 if [ "$LOCAL_ATTEMPT" -lt 5 ]; then
-                  echo "Real Bilky failure. Waiting 3 minutes before next attempt."
-                  sleep 180
+                  echo "Real Bilky failure. Waiting 2 minutes before next attempt."
+                  sleep 120
                 fi
               fi
             done
@@ -271,14 +271,14 @@ jobs:
               if [ "$ACTION" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
               MESSAGE="Bilky for ${CLIENT_LABEL}: ${LABEL} is taking a little longer than usual. We’re continuing automatically. No action is required from you."
               notify_user_and_admin "$MESSAGE"
-              echo "Cycle 1 exhausted. Waiting 3 minutes before Cycle 2."
-              sleep 180
+              echo "Cycle 1 exhausted. Waiting 2 minutes before Cycle 2."
+              sleep 120
             elif [ "$CYCLE" -eq 2 ]; then
               if [ "$ACTION" = "morning" ]; then LABEL="Morning"; else LABEL="Evening"; fi
               MESSAGE="⚠️ Bilky recovery for ${CLIENT_LABEL}: ${LABEL} is still in progress after 10 attempts. Final recovery cycle started."
               notify_admin_only "$MESSAGE"
-              echo "Cycle 2 exhausted. Waiting 3 minutes before Cycle 3."
-              sleep 180
+              echo "Cycle 2 exhausted. Waiting 2 minutes before Cycle 3."
+              sleep 120
             fi
           done
 
