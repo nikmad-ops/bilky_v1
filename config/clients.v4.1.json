@@ -71,8 +71,9 @@
   "recovery": {
     "cycles": 3,
     "attemptsPerCycle": 5,
-    "retryMinutes": 3,
+    "retryMinutes": 2,
     "airtopSessionBudgetMs": 28000,
-    "postLoginStateTimeoutMs": 8000
+    "postLoginStateTimeoutMs": 8000,
+    "scrapelessSessionBudgetMs": 50000
   }
 }
