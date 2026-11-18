@@ -7,6 +7,7 @@ export const WORKSHIFT_URL =
 export const TIMEZONE = "Europe/Madrid";
 
 const AIRTOP_SESSION_BUDGET_MS = 28000;
+const SCRAPELESS_SESSION_BUDGET_MS = 50000;
 const POST_LOGIN_STATE_TIMEOUT_MS = 8000;
 const FORENSIC_CAPTURE_BUDGET_MS = 3500;
 const AIRTOP_PROFILE_NAME = process.env.AIRTOP_PROFILE_NAME || "bilky-nik";
@@ -115,6 +116,14 @@ export function createProductionClient({
   }
   let sessionReadyAt = 0;
   let sessionDeadline = 0;
+  const scrapelessSolvedChallengeKeys = new Set();
+  let scrapelessCaptchaWaiter = null;
+
+  function sessionBudgetMs() {
+    return provider === "scrapeless"
+      ? SCRAPELESS_SESSION_BUDGET_MS
+      : AIRTOP_SESSION_BUDGET_MS;
+  }
 
   async function connect() {
     if (provider === "airtop") {
@@ -140,10 +149,10 @@ export function createProductionClient({
       }
 
       sessionReadyAt = Date.now();
-      sessionDeadline = sessionReadyAt + AIRTOP_SESSION_BUDGET_MS;
+      sessionDeadline = sessionReadyAt + sessionBudgetMs();
 
       log(
-        `Airtop session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms profile=${AIRTOP_PROFILE_NAME}`
+        `Airtop session ready: ${sessionId}; budget=${sessionBudgetMs()}ms profile=${AIRTOP_PROFILE_NAME}`
       );
 
       try {
@@ -202,10 +211,10 @@ export function createProductionClient({
 
       sessionId = sessionName;
       sessionReadyAt = Date.now();
-      sessionDeadline = sessionReadyAt + AIRTOP_SESSION_BUDGET_MS;
+      sessionDeadline = sessionReadyAt + sessionBudgetMs();
 
       log(
-        `Scrapeless session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms`
+        `Scrapeless session ready: ${sessionId}; budget=${sessionBudgetMs()}ms`
       );
     } else {
       const region = String(process.env.BROWSERLESS_REGION || "ams").trim().toLowerCase();
@@ -232,10 +241,10 @@ export function createProductionClient({
 
       sessionId = `browserless-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
       sessionReadyAt = Date.now();
-      sessionDeadline = sessionReadyAt + AIRTOP_SESSION_BUDGET_MS;
+      sessionDeadline = sessionReadyAt + sessionBudgetMs();
 
       log(
-        `Browserless session ready: ${sessionId}; budget=${AIRTOP_SESSION_BUDGET_MS}ms`
+        `Browserless session ready: ${sessionId}; budget=${sessionBudgetMs()}ms`
       );
     }
 
@@ -267,6 +276,23 @@ export function createProductionClient({
           log(
             `Scrapeless ${eventName}: type=${safeEvent.type || "unknown"} success=${safeEvent.success ?? "n/a"} message=${safeEvent.message || "n/a"}`
           );
+
+          if (
+            scrapelessCaptchaWaiter &&
+            (eventName === "Captcha.solveFinished" || eventName === "Captcha.solveFailed")
+          ) {
+            const waiter = scrapelessCaptchaWaiter;
+            scrapelessCaptchaWaiter = null;
+            waiter({
+              event: eventName,
+              success:
+                eventName === "Captcha.solveFinished"
+                  ? event?.success !== false
+                  : false,
+              message: event?.message || null,
+              type: event?.type || null,
+            });
+          }
           fs.writeFileSync(
             `${diagnosticsDir}/captcha-events.json`,
             JSON.stringify(captchaEvents, null, 2),
@@ -304,32 +330,86 @@ export function createProductionClient({
   }
 
   function remainingSessionMs() {
-    if (!sessionDeadline) return AIRTOP_SESSION_BUDGET_MS;
+    if (!sessionDeadline) return sessionBudgetMs();
     return Math.max(0, sessionDeadline - Date.now());
   }
 
-  function armScrapelessCaptchaSolve(stage) {
-    if (provider !== "scrapeless" || !scrapelessCdp) return;
+  async function pageHasScrapelessChallenge() {
+    if (provider !== "scrapeless" || !page) return false;
 
-    const remaining = remainingSessionMs();
-    if (remaining <= 1000) return;
-
-    const detectTimeout = Math.max(1000, Math.min(8000, remaining - 1000));
-
-    scrapelessCdp
-      .send("Captcha.solve", { detectTimeout })
-      .then((result) => {
-        log(
-          `Scrapeless Captcha.solve ${stage}: success=${result?.success ?? "n/a"} message=${result?.message || "n/a"} type=${result?.type || "unknown"}`
+    return page
+      .evaluate(() => {
+        const text = document.body?.innerText || "";
+        const html = document.documentElement?.outerHTML || "";
+        return (
+          /\/cdn-cgi\/challenge-platform\//i.test(html) ||
+          Boolean(
+            document.querySelector(
+              '[name="cf-turnstile-response"], iframe[src*="turnstile"], [id*="cf-chl"], [class*="cf-chl"], [data-cf-chl]'
+            )
+          ) ||
+          /checking your browser|verify you are human|security verification|performing security verification|just a moment/i.test(
+            document.title + " " + text
+          )
         );
       })
-      .catch((error) => {
-        log(
-          `Scrapeless Captcha.solve ${stage} warning: ${String(error?.message || error)
-            .split("\n")[0]
-            .slice(0, 200)}`
-        );
-      });
+      .catch(() => false);
+  }
+
+  async function handleScrapelessChallenge(stage) {
+    if (provider !== "scrapeless" || !scrapelessCdp || !page) return false;
+    if (!(await pageHasScrapelessChallenge())) return false;
+
+    const key = `${stage}|${safeUrl(page.url())}`;
+    if (scrapelessSolvedChallengeKeys.has(key)) {
+      return true;
+    }
+    scrapelessSolvedChallengeKeys.add(key);
+
+    const remaining = remainingSessionMs();
+    if (remaining <= 1000) return true;
+
+    log(
+      `Scrapeless challenge detected at ${stage}; one managed solve; remaining=${remaining}ms`
+    );
+
+    const eventPromise = new Promise((resolve) => {
+      scrapelessCaptchaWaiter = resolve;
+    });
+
+    const commandPromise = scrapelessCdp
+      .send("Captcha.solve", {
+        detectTimeout: Math.max(1000, Math.min(12000, remaining - 1000)),
+      })
+      .then((result) => ({
+        source: "command",
+        success: result?.success ?? null,
+        message: result?.message || null,
+        type: result?.type || null,
+      }))
+      .catch((error) => ({
+        source: "command",
+        success: false,
+        message: String(error?.message || error).split("\n")[0].slice(0, 200),
+        type: null,
+      }));
+
+    const timeoutMs = Math.max(1, remainingSessionMs());
+    const terminal = await Promise.race([
+      eventPromise.then((result) => ({ source: "event", ...result })),
+      commandPromise,
+      sleep(timeoutMs).then(() => ({ source: "budget", success: false, message: "session budget reached", type: null })),
+    ]);
+
+    if (terminal.source !== "event" && scrapelessCaptchaWaiter) {
+      scrapelessCaptchaWaiter = null;
+    }
+
+    log(
+      `Scrapeless managed solve ${stage}: source=${terminal.source} success=${terminal.success ?? "n/a"} message=${terminal.message || "n/a"} type=${terminal.type || "unknown"}`
+    );
+
+    return true;
   }
 
   function assertSessionBudget(stage) {
@@ -337,7 +417,7 @@ export function createProductionClient({
 
     if (remaining <= 0) {
       throw new Error(
-        `${provider} session budget exceeded at ${stage}: ${AIRTOP_SESSION_BUDGET_MS}ms`
+        `${provider} session budget exceeded at ${stage}: ${sessionBudgetMs()}ms`
       );
     }
 
@@ -354,7 +434,7 @@ export function createProductionClient({
           () =>
             reject(
               new Error(
-                `${provider} session budget exceeded at ${stage}: ${AIRTOP_SESSION_BUDGET_MS}ms`
+                `${provider} session budget exceeded at ${stage}: ${sessionBudgetMs()}ms`
               )
             ),
           remaining
@@ -370,7 +450,7 @@ export function createProductionClient({
     );
   }
 
-  async function waitForState(date, timeoutMs = AIRTOP_SESSION_BUDGET_MS) {
+  async function waitForState(date, timeoutMs = sessionBudgetMs()) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
       .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
@@ -384,11 +464,22 @@ export function createProductionClient({
         return "workshift";
       }
 
-      if (page.url().includes("/auth/login")) {
+      const hasLoginFields =
+        (await page.locator("#taxid").count().catch(() => 0)) > 0 &&
+        (await page.locator("#password").count().catch(() => 0)) > 0;
+
+      if (hasLoginFields) {
         return "login";
       }
 
-      if (isDashboardUrl() || (await workshiftLink.count())) {
+      if (await pageHasScrapelessChallenge()) {
+        await handleScrapelessChallenge("waitForState");
+        await sleep(250);
+        continue;
+      }
+
+      const hasWorkshiftLink = (await workshiftLink.count().catch(() => 0)) > 0;
+      if (isDashboardUrl() && hasWorkshiftLink) {
         return "dashboard";
       }
 
@@ -573,7 +664,9 @@ export function createProductionClient({
 
   async function waitAfterLogin(
     date,
-    timeoutMs = POST_LOGIN_STATE_TIMEOUT_MS
+    timeoutMs = provider === "scrapeless"
+      ? remainingSessionMs()
+      : POST_LOGIN_STATE_TIMEOUT_MS
   ) {
     const container = page.locator(`#container_${date}`);
     const workshiftLink = page
@@ -589,7 +682,14 @@ export function createProductionClient({
         return "workshift";
       }
 
-      if (isDashboardUrl() || (await workshiftLink.count())) {
+      if (await pageHasScrapelessChallenge()) {
+        await handleScrapelessChallenge("waitAfterLogin");
+        await sleep(250);
+        continue;
+      }
+
+      const hasWorkshiftLink = (await workshiftLink.count().catch(() => 0)) > 0;
+      if (isDashboardUrl() && hasWorkshiftLink) {
         return "dashboard";
       }
 
@@ -638,8 +738,6 @@ export function createProductionClient({
 
     log("Submitting Bilky login form via requestSubmit (viewport-independent).");
 
-    armScrapelessCaptchaSolve("login-submit");
-
     await submit.evaluate((el) => {
       const form = el.form;
       if (form && typeof form.requestSubmit === "function") {
@@ -654,8 +752,6 @@ export function createProductionClient({
 
   async function openWorkshift(date) {
     log(`Opening direct Workshift URL through ${provider}.`);
-
-    armScrapelessCaptchaSolve("initial-workshift");
 
     await withinSessionBudget(
       () =>
@@ -684,8 +780,6 @@ export function createProductionClient({
       log(
         `Dashboard detected; opening Workshift by authenticated URL. href=${href}`
       );
-
-      armScrapelessCaptchaSolve("dashboard-workshift");
 
       await withinSessionBudget(
         () =>
@@ -1034,6 +1128,7 @@ export function createProductionClient({
     context = null;
     page = null;
     scrapelessCdp = null;
+    scrapelessCaptchaWaiter = null;
     sessionId = null;
     sessionReadyAt = 0;
     sessionDeadline = 0;
