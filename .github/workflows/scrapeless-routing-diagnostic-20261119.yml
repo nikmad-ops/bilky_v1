@@ -10,6 +10,7 @@ on:
 jobs:
   diagnostic:
     runs-on: ubuntu-latest
+    environment: client-nik
     strategy:
       fail-fast: false
       matrix:
