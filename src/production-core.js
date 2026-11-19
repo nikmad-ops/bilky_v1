@@ -193,29 +193,94 @@ export function createProductionClient({
         timeout: 120000,
       });
     } else if (provider === "scrapeless") {
-      const sessionName = `bilky-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
-      const params = new URLSearchParams({
-        token: scrapelessApiKey,
-        sessionTTL: "60",
-        sessionName,
-        sessionRecording: "true",
-        proxyCountry: "ES",
-      });
+      const maxConnectAttempts = 3;
+      let lastConnectError = null;
 
-      log(`Creating Scrapeless session. attempt=${attempt}/5 proxy=ES`);
+      for (let connectAttempt = 1; connectAttempt <= maxConnectAttempts; connectAttempt += 1) {
+        const sessionName = `bilky-${process.env.CLIENT_ID || "client"}-${Date.now()}-c${connectAttempt}`;
+        const params = new URLSearchParams({
+          token: scrapelessApiKey,
+          sessionTTL: "60",
+          sessionName,
+          sessionRecording: "true",
+          proxyCountry: "ES",
+        });
 
-      browser = await chromium.connectOverCDP(
-        `wss://browser.scrapeless.com/api/v2/browser?${params.toString()}`,
-        { timeout: 20000 }
-      );
+        log(
+          `Creating Scrapeless session. attempt=${attempt}/5 connect=${connectAttempt}/${maxConnectAttempts} proxy=ES`
+        );
 
-      sessionId = sessionName;
-      sessionReadyAt = Date.now();
-      sessionDeadline = sessionReadyAt + sessionBudgetMs();
+        try {
+          browser = await chromium.connectOverCDP(
+            `wss://browser.scrapeless.com/api/v2/browser?${params.toString()}`,
+            { timeout: 20000 }
+          );
 
-      log(
-        `Scrapeless session ready: ${sessionId}; budget=${sessionBudgetMs()}ms`
-      );
+          sessionId = sessionName;
+          sessionReadyAt = Date.now();
+          sessionDeadline = sessionReadyAt + sessionBudgetMs();
+
+          log(
+            `Scrapeless session ready: ${sessionId}; budget=${sessionBudgetMs()}ms connect=${connectAttempt}/${maxConnectAttempts}`
+          );
+          lastConnectError = null;
+          break;
+        } catch (error) {
+          lastConnectError = error;
+          const message = String(error?.message || error).split("\n")[0].slice(0, 240);
+          log(
+            `Scrapeless connect failed: connect=${connectAttempt}/${maxConnectAttempts} message=${message}`
+          );
+
+          if (connectAttempt < maxConnectAttempts) {
+            log("Scrapeless infrastructure reconnect in 5 seconds.");
+            await sleep(5000);
+          }
+        }
+      }
+
+      if (!browser) {
+        if (!browserlessToken) {
+          throw lastConnectError || new Error("Scrapeless connection failed and Browserless fallback is unavailable");
+        }
+
+        log(
+          "Scrapeless unavailable after 3 connection attempts; switching this Bilky attempt to Browserless fallback."
+        );
+        provider = "browserless";
+
+        const region = String(process.env.BROWSERLESS_REGION || "ams").trim().toLowerCase();
+        if (!["ams", "lon", "sfo"].includes(region)) {
+          throw new Error(`Invalid BROWSERLESS_REGION: ${region}`);
+        }
+
+        const params = new URLSearchParams({
+          token: browserlessToken,
+          solveCaptchas: "true",
+          timeout: "60000",
+        });
+
+        const profile = String(process.env.BROWSERLESS_PROFILE || "").trim();
+        if (profile) params.set("profile", profile);
+
+        const host = `production-${region}.browserless.io`;
+        log(
+          `Creating Browserless fallback session. attempt=${attempt}/5 region=${region} route=/stealth solveCaptchas=true`
+        );
+
+        browser = await chromium.connectOverCDP(
+          `wss://${host}/stealth?${params.toString()}`,
+          { timeout: 20000 }
+        );
+
+        sessionId = `browserless-${process.env.CLIENT_ID || "client"}-${Date.now()}`;
+        sessionReadyAt = Date.now();
+        sessionDeadline = sessionReadyAt + sessionBudgetMs();
+
+        log(
+          `Browserless fallback session ready: ${sessionId}; budget=${sessionBudgetMs()}ms`
+        );
+      }
     } else {
       const region = String(process.env.BROWSERLESS_REGION || "ams").trim().toLowerCase();
       if (!["ams", "lon", "sfo"].includes(region)) {
