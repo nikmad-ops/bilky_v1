@@ -1,0 +1,48 @@
+name: Bilky | Evening Restart 2026-11-19
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/manual-evening-restart-20261119.yml'
+
+jobs:
+  nik:
+    uses: ./.github/workflows/workshift-v4.1-master.yml
+    with:
+      client_id: nik
+      client_label: Nik
+      airtop_profile: bilky-nik
+      github_environment: client-nik
+      action: evening
+      mode: manual
+      browser_provider: scrapeless
+      concurrency_suffix: restart-20261119
+    secrets: inherit
+
+  alena:
+    uses: ./.github/workflows/workshift-v4.1-master.yml
+    with:
+      client_id: alena
+      client_label: Alena
+      airtop_profile: bilky-alena
+      github_environment: client-alena
+      action: evening
+      mode: manual
+      browser_provider: scrapeless
+      concurrency_suffix: restart-20261119
+    secrets: inherit
+
+  irakli:
+    uses: ./.github/workflows/workshift-v4.1-master.yml
+    with:
+      client_id: irakli
+      client_label: Irakli
+      airtop_profile: bilky-irakli
+      github_environment: client-irakli
+      action: evening
+      mode: manual
+      browser_provider: scrapeless
+      concurrency_suffix: restart-20261119
+    secrets: inherit
