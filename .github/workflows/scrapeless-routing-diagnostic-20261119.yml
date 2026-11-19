@@ -1,0 +1,75 @@
+name: Scrapeless Routing Diagnostic 2026-11-19
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/scrapeless-routing-diagnostic-20261119.yml'
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        route: [ES, ANY, NONE]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test Scrapeless CDP routing
+        shell: bash
+        env:
+          SCRAPELESS_API_KEY: ${{ secrets.SCRAPELESS_API_KEY }}
+          ROUTE: ${{ matrix.route }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { chromium } from "playwright";
+
+          const token = process.env.SCRAPELESS_API_KEY;
+          const route = process.env.ROUTE;
+          if (!token) throw new Error("Missing SCRAPELESS_API_KEY");
+
+          const results = [];
+          for (let i = 1; i <= 3; i++) {
+            const params = new URLSearchParams({
+              token,
+              sessionTTL: "180",
+              sessionName: `diag-${route.toLowerCase()}-${Date.now()}-${i}`,
+              sessionRecording: "false",
+            });
+            if (route !== "NONE") params.set("proxyCountry", route);
+
+            const started = Date.now();
+            let browser;
+            try {
+              browser = await chromium.connectOverCDP(
+                `wss://browser.scrapeless.com/api/v2/browser?${params.toString()}`,
+                { timeout: 20000 }
+              );
+              const contexts = browser.contexts();
+              const context = contexts[0] || await browser.newContext();
+              const page = context.pages()[0] || await context.newPage();
+              await page.goto("about:blank", { waitUntil: "domcontentloaded", timeout: 5000 });
+              const ms = Date.now() - started;
+              console.log(`RESULT route=${route} try=${i} success=true connect_ms=${ms}`);
+              results.push({ route, try: i, success: true, connectMs: ms });
+            } catch (error) {
+              const ms = Date.now() - started;
+              const message = String(error?.message || error).split("\n")[0];
+              console.log(`RESULT route=${route} try=${i} success=false connect_ms=${ms} error=${message}`);
+              results.push({ route, try: i, success: false, connectMs: ms, error: message });
+            } finally {
+              await browser?.close().catch(() => {});
+            }
+            if (i < 3) await new Promise(r => setTimeout(r, 3000));
+          }
+
+          console.log("SUMMARY " + JSON.stringify(results));
+          const successes = results.filter(x => x.success).length;
+          if (successes === 0) process.exitCode = 2;
+          NODE
