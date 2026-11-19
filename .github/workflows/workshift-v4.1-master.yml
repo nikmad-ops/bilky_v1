@@ -25,6 +25,10 @@ on:
         required: false
         type: string
         default: airtop
+      concurrency_suffix:
+        required: false
+        type: string
+        default: ''
     secrets:
       BILKY_NIF:
         required: true
@@ -97,7 +101,7 @@ on:
           - airtop
 
 concurrency:
-  group: bilky-v4-${{ inputs.client_id }}-${{ inputs.action }}
+  group: bilky-v4-${{ inputs.client_id }}-${{ inputs.action }}-${{ inputs.concurrency_suffix || 'default' }}
   cancel-in-progress: false
 
 jobs:
