@@ -420,7 +420,33 @@ export function createProductionClient({
       .catch(() => false);
   }
 
-  async function handleScrapelessChallenge(stage) {
+  async function detectKnownBilkyState(date) {
+    if (!page) return null;
+    if (await pageHasScrapelessChallenge()) return null;
+
+    const container = page.locator(`#container_${date}`);
+    if (await container.isVisible().catch(() => false)) {
+      return "workshift";
+    }
+
+    const hasLoginFields =
+      (await page.locator("#taxid").count().catch(() => 0)) > 0 &&
+      (await page.locator("#password").count().catch(() => 0)) > 0;
+    if (hasLoginFields) {
+      return "login";
+    }
+
+    const workshiftLink = page
+      .locator('a[href*="/employee/hour-registration/hour-registration/show/"]')
+      .first();
+    if ((await workshiftLink.count().catch(() => 0)) > 0) {
+      return "dashboard";
+    }
+
+    return null;
+  }
+
+  async function handleScrapelessChallenge(stage, date) {
     if (provider !== "scrapeless" || !scrapelessCdp || !page) return false;
     if (!(await pageHasScrapelessChallenge())) return false;
 
@@ -458,9 +484,33 @@ export function createProductionClient({
         );
       });
 
+    const knownStatePromise = (async () => {
+      while (remainingSessionMs() > 0) {
+        const state = await detectKnownBilkyState(date);
+        if (state) {
+          return {
+            source: "bilky-state",
+            success: true,
+            message: `challenge cleared; Bilky state=${state}`,
+            type: null,
+            state,
+          };
+        }
+        await sleep(250);
+      }
+
+      return {
+        source: "budget",
+        success: false,
+        message: "session budget reached",
+        type: null,
+      };
+    })();
+
     const timeoutMs = Math.max(1, remainingSessionMs());
     const terminal = await Promise.race([
       eventPromise.then((result) => ({ source: "event", ...result })),
+      knownStatePromise,
       sleep(timeoutMs).then(() => ({
         source: "budget",
         success: false,
@@ -541,7 +591,7 @@ export function createProductionClient({
       }
 
       if (await pageHasScrapelessChallenge()) {
-        await handleScrapelessChallenge("waitForState");
+        await handleScrapelessChallenge("waitForState", date);
         await sleep(250);
         continue;
       }
@@ -751,7 +801,7 @@ export function createProductionClient({
       }
 
       if (await pageHasScrapelessChallenge()) {
-        await handleScrapelessChallenge("waitAfterLogin");
+        await handleScrapelessChallenge("waitAfterLogin", date);
         await sleep(250);
         continue;
       }
@@ -816,6 +866,56 @@ export function createProductionClient({
     });
 
     return waitAfterLogin(date);
+  }
+
+  function isScrapelessProxyTunnelError(error) {
+    const message = String(error?.message || error || "");
+    return (
+      message.includes("ERR_TUNNEL_CONNECTION_FAILED") ||
+      message.includes("ERR_PROXY_CONNECTION_FAILED")
+    );
+  }
+
+  async function openWorkshiftWithInfrastructureRecovery(date) {
+    const maxProxyAttempts = 3;
+
+    for (let proxyAttempt = 1; proxyAttempt <= maxProxyAttempts; proxyAttempt += 1) {
+      try {
+        await openWorkshift(date);
+        return;
+      } catch (error) {
+        if (provider !== "scrapeless" || !isScrapelessProxyTunnelError(error)) {
+          throw error;
+        }
+
+        const message = String(error?.message || error).split("\n")[0].slice(0, 240);
+        log(
+          `Scrapeless proxy/tunnel failure: proxyAttempt=${proxyAttempt}/${maxProxyAttempts} message=${message}`
+        );
+
+        if (proxyAttempt < maxProxyAttempts) {
+          log("Retrying with a fresh Scrapeless session in 5 seconds; business attempt is not consumed.");
+          await close();
+          provider = "scrapeless";
+          await sleep(5000);
+          await connect();
+          continue;
+        }
+
+        if (!browserlessToken) {
+          throw error;
+        }
+
+        log(
+          "Scrapeless proxy/tunnel failed 3 fresh sessions; switching this Bilky attempt to Browserless fallback."
+        );
+        await close();
+        provider = "browserless";
+        await connect();
+        await openWorkshift(date);
+        return;
+      }
+    }
   }
 
   async function openWorkshift(date) {
@@ -943,7 +1043,7 @@ export function createProductionClient({
     await connect();
 
     try {
-      await openWorkshift(date);
+      await openWorkshiftWithInfrastructureRecovery(date);
       const { cell, cells } = await targetCells(mode, date);
 
       const fact = await readFact(cell);
@@ -974,9 +1074,9 @@ export function createProductionClient({
     await connect();
 
     try {
-      return await withinSessionBudget(async () => {
-        await openWorkshift(date);
+      await openWorkshiftWithInfrastructureRecovery(date);
 
+      return await withinSessionBudget(async () => {
       const { cell, cells } = await targetCells(mode, date);
       const alreadyFact = await readFact(cell);
 
@@ -1198,13 +1298,3 @@ export function createProductionClient({
     scrapelessCdp = null;
     scrapelessCaptchaWaiter = null;
     sessionId = null;
-    sessionReadyAt = 0;
-    sessionDeadline = 0;
-  }
-
-  return {
-    inspect,
-    execute,
-    close,
-  };
-}
