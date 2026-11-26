@@ -1298,3 +1298,13 @@ export function createProductionClient({
     scrapelessCdp = null;
     scrapelessCaptchaWaiter = null;
     sessionId = null;
+    sessionReadyAt = 0;
+    sessionDeadline = 0;
+  }
+
+  return {
+    inspect,
+    execute,
+    close,
+  };
+}
